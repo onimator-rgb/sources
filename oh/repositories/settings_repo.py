@@ -11,11 +11,13 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _CONFIG_DEFAULTS = [
-    ("bot_root_path",         None,    "Absolute path to the Onimator installation folder"),
-    ("pc_name",               None,    "This machine identifier (auto-set on first run)"),
-    ("min_follows_threshold", "100",   "Minimum follow count for FBR source inclusion"),
-    ("min_fbr_threshold",     "10.0",  "Minimum FBR% to flag a source as quality"),
-    ("theme",                 "dark",  "UI theme: dark or light"),
+    ("bot_root_path",                None,    "Absolute path to the Onimator installation folder"),
+    ("pc_name",                      None,    "This machine identifier (auto-set on first run)"),
+    ("min_follows_threshold",        "100",   "Minimum follow count for FBR source inclusion"),
+    ("min_fbr_threshold",            "10.0",  "Minimum FBR% to flag a source as quality"),
+    ("theme",                        "dark",  "UI theme: dark or light"),
+    ("weak_source_delete_threshold", "5.0",   "FBR% at or below which a source is considered weak for bulk deletion"),
+    ("min_source_count_warning",     "5",     "Warn if an account has fewer active sources than this"),
 ]
 
 
@@ -72,6 +74,14 @@ class SettingsRepository:
         min_follows = int(self.get("min_follows_threshold") or "100")
         min_fbr = float(self.get("min_fbr_threshold") or "10.0")
         return min_follows, min_fbr
+
+    def get_weak_source_threshold(self) -> float:
+        """Returns the FBR% threshold used for bulk weak-source deletion."""
+        return float(self.get("weak_source_delete_threshold") or "5.0")
+
+    def get_min_source_count_warning(self) -> int:
+        """Returns the minimum active source count below which to warn."""
+        return int(self.get("min_source_count_warning") or "5")
 
     def get_all(self) -> dict:
         rows = self._conn.execute("SELECT key, value, description FROM oh_config").fetchall()

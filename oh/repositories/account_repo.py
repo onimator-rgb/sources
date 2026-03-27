@@ -19,7 +19,7 @@ class AccountRepository:
     # Queries
     # ------------------------------------------------------------------
 
-    def get_all_active(self) -> list:
+    def get_all_active(self) -> list[AccountRecord]:
         rows = self._conn.execute(
             """
             SELECT a.*, d.device_name
@@ -31,7 +31,7 @@ class AccountRepository:
         ).fetchall()
         return [self._from_row(r) for r in rows]
 
-    def get_all(self) -> list:
+    def get_all(self) -> list[AccountRecord]:
         """Returns all accounts including removed ones (for full history view)."""
         rows = self._conn.execute(
             """
@@ -69,88 +69,72 @@ class AccountRepository:
         ).fetchone()
         return self._from_row(row) if row else None
 
-    def get_active_keyset(self) -> set:
-        """Returns set of (device_id, username) for all non-removed accounts."""
+    def get_active_id_map(self) -> dict[tuple, int]:
+        """Returns {(device_id, username): id} for all non-removed accounts."""
         rows = self._conn.execute(
-            "SELECT device_id, username FROM oh_accounts WHERE removed_at IS NULL"
+            "SELECT id, device_id, username FROM oh_accounts WHERE removed_at IS NULL"
         ).fetchall()
-        return {(r["device_id"], r["username"]) for r in rows}
-
-    def search(self, query: str) -> list:
-        pattern = f"%{query}%"
-        rows = self._conn.execute(
-            """
-            SELECT a.*, d.device_name
-            FROM oh_accounts a
-            LEFT JOIN oh_devices d ON d.device_id = a.device_id
-            WHERE a.removed_at IS NULL
-              AND (a.username LIKE ? OR d.device_name LIKE ?)
-            ORDER BY d.device_name, a.username
-            """,
-            (pattern, pattern),
-        ).fetchall()
-        return [self._from_row(r) for r in rows]
+        return {(r["device_id"], r["username"]): r["id"] for r in rows}
 
     # ------------------------------------------------------------------
     # Writes
     # ------------------------------------------------------------------
 
-    def upsert(self, account: AccountRecord) -> AccountRecord:
-        """
-        Insert new account or update existing one.
-        Clears removed_at/removal_sync_run_id if the account reappears.
-        """
-        existing = self.get_by_device_and_username(account.device_id, account.username)
-
-        if existing is None:
-            cursor = self._conn.execute(
-                """
-                INSERT INTO oh_accounts (
-                    device_id, username, discovered_at, last_seen_at,
-                    start_time, end_time, follow_enabled, unfollow_enabled,
-                    limit_per_day, data_db_exists, sources_txt_exists
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    account.device_id, account.username,
-                    account.discovered_at, account.last_seen_at,
-                    account.start_time, account.end_time,
-                    1 if account.follow_enabled else 0,
-                    1 if account.unfollow_enabled else 0,
-                    account.limit_per_day,
-                    1 if account.data_db_exists else 0,
-                    1 if account.sources_txt_exists else 0,
-                ),
-            )
-            account.id = cursor.lastrowid
-        else:
-            self._conn.execute(
-                """
-                UPDATE oh_accounts SET
-                    last_seen_at=?,
-                    start_time=?, end_time=?,
-                    follow_enabled=?, unfollow_enabled=?,
-                    limit_per_day=?,
-                    data_db_exists=?, sources_txt_exists=?,
-                    removed_at=NULL,
-                    removal_sync_run_id=NULL
-                WHERE id=?
-                """,
-                (
-                    account.last_seen_at,
-                    account.start_time, account.end_time,
-                    1 if account.follow_enabled else 0,
-                    1 if account.unfollow_enabled else 0,
-                    account.limit_per_day,
-                    1 if account.data_db_exists else 0,
-                    1 if account.sources_txt_exists else 0,
-                    existing.id,
-                ),
-            )
-            account.id = existing.id
-
+    def insert(self, account: AccountRecord) -> AccountRecord:
+        """Insert a new account row. Sets account.id from the new row."""
+        cursor = self._conn.execute(
+            """
+            INSERT INTO oh_accounts (
+                device_id, username, discovered_at, last_seen_at,
+                start_time, end_time, follow_enabled, unfollow_enabled,
+                limit_per_day, data_db_exists, sources_txt_exists
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                account.device_id, account.username,
+                account.discovered_at, account.last_seen_at,
+                account.start_time, account.end_time,
+                1 if account.follow_enabled else 0,
+                1 if account.unfollow_enabled else 0,
+                account.limit_per_day,
+                1 if account.data_db_exists else 0,
+                1 if account.sources_txt_exists else 0,
+            ),
+        )
+        account.id = cursor.lastrowid
         self._conn.commit()
         return account
+
+    def update(self, account_id: int, account: AccountRecord) -> None:
+        """
+        Update metadata for an existing account row.
+        Clears removed_at / removal_sync_run_id if the account reappears.
+        """
+        self._conn.execute(
+            """
+            UPDATE oh_accounts SET
+                last_seen_at=?,
+                start_time=?, end_time=?,
+                follow_enabled=?, unfollow_enabled=?,
+                limit_per_day=?,
+                data_db_exists=?, sources_txt_exists=?,
+                removed_at=NULL,
+                removal_sync_run_id=NULL
+            WHERE id=?
+            """,
+            (
+                account.last_seen_at,
+                account.start_time, account.end_time,
+                1 if account.follow_enabled else 0,
+                1 if account.unfollow_enabled else 0,
+                account.limit_per_day,
+                1 if account.data_db_exists else 0,
+                1 if account.sources_txt_exists else 0,
+                account_id,
+            ),
+        )
+        account.id = account_id
+        self._conn.commit()
 
     def mark_removed(
         self, account_id: int, removed_at: str, sync_run_id: int

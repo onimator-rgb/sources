@@ -7,7 +7,6 @@ Records a complete sync run with per-account event history.
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 from oh.models.account import AccountRecord, DiscoveredAccount, DeviceRecord
 from oh.models.sync import SyncRun, SyncSummary
@@ -94,9 +93,13 @@ class SyncModule:
         now = _utcnow()
 
         # --- Upsert devices seen in this scan ---
-        seen_device_ids = {d.device_id for d in discovered}
-        for device_id in seen_device_ids:
-            sample = next(d for d in discovered if d.device_id == device_id)
+        # Build a map to avoid O(n) scan per unique device_id
+        device_samples: dict[str, DiscoveredAccount] = {}
+        for d in discovered:
+            if d.device_id not in device_samples:
+                device_samples[d.device_id] = d
+
+        for device_id, sample in device_samples.items():
             self._device_repo.upsert(DeviceRecord(
                 device_id=sample.device_id,
                 device_name=sample.device_name,
@@ -105,10 +108,10 @@ class SyncModule:
                 last_synced_at=now,
                 is_active=True,
             ))
-        summary.devices_scanned = len(seen_device_ids)
+        summary.devices_scanned = len(device_samples)
 
         # Keyset of non-orphan accounts in this scan
-        scanned_keys: set = set()
+        scanned_keys: set[tuple] = set()
         for d in discovered:
             if not d.is_orphan_folder:
                 scanned_keys.add((d.device_id, d.username))
@@ -140,7 +143,7 @@ class SyncModule:
 
             if existing is None or existing.removed_at is not None:
                 # New account or re-appearing removed account
-                saved = self._account_repo.upsert(account)
+                saved = self._account_repo.insert(account)
                 self._sync_repo.record_event(
                     sync_run_id=sync_run.id,
                     event_type="added",
@@ -153,7 +156,7 @@ class SyncModule:
             else:
                 # Active account — check metadata delta
                 changes = _metadata_diff(existing, disc)
-                saved = self._account_repo.upsert(account)
+                self._account_repo.update(existing.id, account)
 
                 if changes:
                     self._sync_repo.record_event(
@@ -161,7 +164,7 @@ class SyncModule:
                         event_type="metadata_changed",
                         device_id=disc.device_id,
                         username=disc.username,
-                        account_id=saved.id,
+                        account_id=existing.id,
                         changed_fields=json.dumps(changes),
                     )
                     summary.accounts_updated += 1
@@ -169,21 +172,22 @@ class SyncModule:
                     summary.accounts_unchanged += 1
 
         # --- Soft-delete accounts no longer present ---
-        active_in_registry = self._account_repo.get_active_keyset()
-        removed_keys = active_in_registry - scanned_keys
+        # get_active_id_map() returns {(device_id, username): id} in one query,
+        # eliminating a per-account SELECT in the removal loop.
+        active_id_map = self._account_repo.get_active_id_map()
+        removed_keys = set(active_id_map.keys()) - scanned_keys
 
         for device_id, username in removed_keys:
-            existing = self._account_repo.get_by_device_and_username(device_id, username)
-            if existing and existing.id is not None:
-                self._account_repo.mark_removed(existing.id, now, sync_run.id)
-                self._sync_repo.record_event(
-                    sync_run_id=sync_run.id,
-                    event_type="removed",
-                    device_id=device_id,
-                    username=username,
-                    account_id=existing.id,
-                )
-                summary.accounts_removed += 1
+            account_id = active_id_map[(device_id, username)]
+            self._account_repo.mark_removed(account_id, now, sync_run.id)
+            self._sync_repo.record_event(
+                sync_run_id=sync_run.id,
+                event_type="removed",
+                device_id=device_id,
+                username=username,
+                account_id=account_id,
+            )
+            summary.accounts_removed += 1
 
 
 def _metadata_diff(existing: AccountRecord, disc: DiscoveredAccount) -> dict:

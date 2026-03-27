@@ -5,7 +5,8 @@ AccountRecord    — a persisted account in the OH registry.
 DeviceRecord     — a persisted device in the OH registry.
 DiscoveredAccount — raw result from a single discovery scan (not yet persisted).
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
@@ -45,7 +46,6 @@ class AccountRecord:
 
     def account_folder(self, bot_root: str) -> str:
         """Resolve the full path to this account's Onimator folder."""
-        from pathlib import Path
         return str(Path(bot_root) / self.device_id / self.username)
 
 

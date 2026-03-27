@@ -5,6 +5,7 @@ and returns a list of DiscoveredAccount objects.
 All Onimator files are opened READ-ONLY (sqlite3 URI ?mode=ro).
 Nothing is ever written to the Onimator folder.
 """
+import contextlib
 import sqlite3
 import logging
 from pathlib import Path
@@ -151,12 +152,11 @@ class DiscoveryModule:
         db_path = self._root / "devices.db"
         try:
             uri = f"file:{db_path.as_posix()}?mode=ro"
-            conn = sqlite3.connect(uri, uri=True)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT deviceid, devicename, status FROM devices"
-            ).fetchall()
-            conn.close()
+            with contextlib.closing(sqlite3.connect(uri, uri=True)) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT deviceid, devicename, status FROM devices"
+                ).fetchall()
             return [(r["deviceid"], r["devicename"], r["status"]) for r in rows]
         except sqlite3.OperationalError as e:
             raise DiscoveryError(f"Cannot read devices.db: {e}") from e
@@ -165,13 +165,12 @@ class DiscoveryModule:
         """Returns list of account dicts from a device's accounts.db."""
         try:
             uri = f"file:{path.as_posix()}?mode=ro"
-            conn = sqlite3.connect(uri, uri=True)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT account, follow, unfollow, limitperday, starttime, endtime "
-                "FROM accounts"
-            ).fetchall()
-            conn.close()
+            with contextlib.closing(sqlite3.connect(uri, uri=True)) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT account, follow, unfollow, limitperday, starttime, endtime "
+                    "FROM accounts"
+                ).fetchall()
             return [dict(r) for r in rows]
         except sqlite3.OperationalError as e:
             # Non-fatal: log and return empty so the device is not silently skipped
