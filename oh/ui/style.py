@@ -15,11 +15,11 @@ from PySide6.QtGui import QPalette, QColor
 
 _FONT_SIZE = "13px"
 _FONT_SIZE_SMALL = "11px"
-_FONT_SIZE_TOOLTIP = "11px"
-_BTN_MIN_HEIGHT = "30px"
-_TAB_PADDING = "8px 20px"
-_CELL_PADDING = "5px 8px"
-_INPUT_PADDING = "5px 8px"
+_FONT_SIZE_TOOLTIP = "12px"
+_BTN_MIN_HEIGHT = "32px"
+_TAB_PADDING = "9px 22px"
+_CELL_PADDING = "6px 10px"
+_INPUT_PADDING = "6px 10px"
 
 
 # ---------------------------------------------------------------------------

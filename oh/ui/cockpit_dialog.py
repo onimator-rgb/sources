@@ -406,8 +406,8 @@ class CockpitDialog(QDialog):
         )
 
         lo = QVBoxLayout(frame)
-        lo.setContentsMargins(8, 6, 8, 6)
-        lo.setSpacing(4)
+        lo.setContentsMargins(10, 8, 10, 8)
+        lo.setSpacing(6)
 
         # Header
         hdr = QHBoxLayout()
@@ -455,10 +455,10 @@ class CockpitDialog(QDialog):
         t.setStyleSheet("border: none;")
 
         if headers[0] == "Sev":
-            t.setColumnWidth(0, 65)
+            t.setColumnWidth(0, 70)
 
-        rh = 24
-        t.setMaximumHeight(rh * min(len(rows), 8) + 28)
+        rh = 28
+        t.setMaximumHeight(rh * min(len(rows), 8) + 32)
 
         for ri, cells in enumerate(rows):
             for ci, (text, color) in enumerate(cells):
@@ -466,7 +466,7 @@ class CockpitDialog(QDialog):
                 if color:
                     item.setForeground(color)
                 t.setItem(ri, ci, item)
-            t.setRowHeight(ri, rh)
+            t.setRowHeight(ri, 28)
 
         if nav_objects:
             def _dbl(index, objs=nav_objects):

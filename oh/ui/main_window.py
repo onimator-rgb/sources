@@ -218,8 +218,8 @@ class MainWindow(QMainWindow):
         root = QWidget()
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
-        outer.setSpacing(6)
-        outer.setContentsMargins(10, 10, 10, 6)
+        outer.setSpacing(8)
+        outer.setContentsMargins(12, 10, 12, 8)
 
         # Brand bar + settings bar sit above the tabs
         outer.addWidget(self._make_brand_bar())
@@ -330,18 +330,18 @@ class MainWindow(QMainWindow):
     def _make_toolbar(self) -> QWidget:
         w = QWidget()
         lo = QHBoxLayout(w)
-        lo.setContentsMargins(0, 0, 0, 0)
-        lo.setSpacing(8)
+        lo.setContentsMargins(0, 4, 0, 4)
+        lo.setSpacing(10)
 
         self._scan_btn = QPushButton("⟳  Scan & Sync")
-        self._scan_btn.setFixedHeight(32)
+        self._scan_btn.setFixedHeight(34)
         self._scan_btn.setToolTip(
             "Discover accounts from the Onimator folder and sync with the OH registry"
         )
         self._scan_btn.clicked.connect(self._on_scan_and_sync)
 
         self._fbr_btn = QPushButton("◈  Analyze FBR")
-        self._fbr_btn.setFixedHeight(32)
+        self._fbr_btn.setFixedHeight(34)
         self._fbr_btn.setToolTip(
             "Run FBR analysis for all active accounts that have data.db\n"
             "and save results to the OH database"
@@ -349,12 +349,12 @@ class MainWindow(QMainWindow):
         self._fbr_btn.clicked.connect(self._on_analyze_fbr)
 
         refresh_btn = QPushButton("Refresh")
-        refresh_btn.setFixedHeight(32)
+        refresh_btn.setFixedHeight(34)
         refresh_btn.setToolTip("Reload the account list from the OH database (no scan)")
         refresh_btn.clicked.connect(self._refresh_table)
 
         self._report_btn = QPushButton("Session Report")
-        self._report_btn.setFixedHeight(32)
+        self._report_btn.setFixedHeight(34)
         self._report_btn.setToolTip("Open session report for today")
         self._report_btn.clicked.connect(self._on_session_report)
 
@@ -368,17 +368,17 @@ class MainWindow(QMainWindow):
         self._last_sync_label.setStyleSheet(f"color: {sc('muted').name()}; font-size: 11px;")
 
         self._cockpit_btn = QPushButton("Cockpit")
-        self._cockpit_btn.setFixedHeight(32)
+        self._cockpit_btn.setFixedHeight(34)
         self._cockpit_btn.setToolTip("Daily operations overview")
         self._cockpit_btn.clicked.connect(self._on_cockpit)
 
         self._history_btn = QPushButton("Action History")
-        self._history_btn.setFixedHeight(32)
+        self._history_btn.setFixedHeight(34)
         self._history_btn.setToolTip("Show recent operator actions")
         self._history_btn.clicked.connect(self._on_action_history)
 
         self._recs_btn = QPushButton("Recommendations")
-        self._recs_btn.setFixedHeight(32)
+        self._recs_btn.setFixedHeight(34)
         self._recs_btn.setToolTip("Generate and view operational recommendations")
         self._recs_btn.clicked.connect(self._on_recommendations)
 
@@ -397,8 +397,8 @@ class MainWindow(QMainWindow):
     def _make_filter_bar(self) -> QWidget:
         w = QWidget()
         lo = QHBoxLayout(w)
-        lo.setContentsMargins(0, 2, 0, 2)
-        lo.setSpacing(8)
+        lo.setContentsMargins(0, 4, 0, 4)
+        lo.setSpacing(10)
 
         # Status filter
         lo.addWidget(QLabel("Status:"))
@@ -497,7 +497,7 @@ class MainWindow(QMainWindow):
 
         # Clear button
         clear_btn = QPushButton("Clear filters")
-        clear_btn.setFixedHeight(24)
+        clear_btn.setFixedHeight(28)
         clear_btn.clicked.connect(self._clear_filters)
         lo.addWidget(clear_btn)
 
@@ -530,27 +530,27 @@ class MainWindow(QMainWindow):
                     COL_ACTIONS):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
 
-        t.setColumnWidth(COL_USERNAME,     160)
-        t.setColumnWidth(COL_DEVICE,       110)
-        t.setColumnWidth(COL_STATUS,        68)
-        t.setColumnWidth(COL_TAGS,         100)
-        t.setColumnWidth(COL_FOLLOW,        52)
-        t.setColumnWidth(COL_UNFOLLOW,      62)
-        t.setColumnWidth(COL_LIMIT,         62)
-        t.setColumnWidth(COL_FOLLOW_TODAY,  78)
-        t.setColumnWidth(COL_LIKE_TODAY,    70)
-        t.setColumnWidth(COL_FOLLOW_LIM,    56)
-        t.setColumnWidth(COL_LIKE_LIM,      52)
-        t.setColumnWidth(COL_REVIEW,        55)
-        t.setColumnWidth(COL_DATA_DB,       56)
-        t.setColumnWidth(COL_SOURCES_TXT,   76)
-        t.setColumnWidth(COL_DISCOVERED,    90)
-        t.setColumnWidth(COL_LAST_SEEN,     90)
-        t.setColumnWidth(COL_SRC_COUNT,     70)
-        t.setColumnWidth(COL_FBR_QUALITY,   82)
-        t.setColumnWidth(COL_FBR_BEST,      70)
-        t.setColumnWidth(COL_FBR_DATE,      80)
-        t.setColumnWidth(COL_ACTIONS,      180)
+        t.setColumnWidth(COL_USERNAME,     170)
+        t.setColumnWidth(COL_DEVICE,       120)
+        t.setColumnWidth(COL_STATUS,        72)
+        t.setColumnWidth(COL_TAGS,         110)
+        t.setColumnWidth(COL_FOLLOW,        56)
+        t.setColumnWidth(COL_UNFOLLOW,      68)
+        t.setColumnWidth(COL_LIMIT,         66)
+        t.setColumnWidth(COL_FOLLOW_TODAY,  84)
+        t.setColumnWidth(COL_LIKE_TODAY,    76)
+        t.setColumnWidth(COL_FOLLOW_LIM,    60)
+        t.setColumnWidth(COL_LIKE_LIM,      56)
+        t.setColumnWidth(COL_REVIEW,        58)
+        t.setColumnWidth(COL_DATA_DB,       60)
+        t.setColumnWidth(COL_SOURCES_TXT,   80)
+        t.setColumnWidth(COL_DISCOVERED,    96)
+        t.setColumnWidth(COL_LAST_SEEN,     96)
+        t.setColumnWidth(COL_SRC_COUNT,     76)
+        t.setColumnWidth(COL_FBR_QUALITY,   88)
+        t.setColumnWidth(COL_FBR_BEST,      76)
+        t.setColumnWidth(COL_FBR_DATE,      86)
+        t.setColumnWidth(COL_ACTIONS,      200)
 
         t.doubleClicked.connect(self._on_row_double_clicked)
         self._table = t
@@ -891,7 +891,7 @@ class MainWindow(QMainWindow):
         )
 
         open_btn = QPushButton("Open Folder")
-        open_btn.setFixedHeight(24)
+        open_btn.setFixedHeight(28)
         open_btn.setEnabled(not removed)
         open_btn.setToolTip("Open this account's folder in Windows Explorer")
         open_btn.clicked.connect(
@@ -899,7 +899,7 @@ class MainWindow(QMainWindow):
         )
 
         src_btn = QPushButton("Sources")
-        src_btn.setFixedHeight(24)
+        src_btn.setFixedHeight(28)
         has_sources = acc.data_db_exists or acc.sources_txt_exists
         src_btn.setEnabled(has_sources)
         src_btn.setToolTip(
@@ -912,7 +912,7 @@ class MainWindow(QMainWindow):
         )
 
         act_btn = QPushButton("\u2026")  # "…"
-        act_btn.setFixedHeight(24)
+        act_btn.setFixedHeight(28)
         act_btn.setFixedWidth(32)
         act_btn.setEnabled(not removed and self._operator_action_service is not None)
         act_btn.setToolTip("Operator actions")
@@ -949,14 +949,14 @@ class MainWindow(QMainWindow):
         )
 
         open_btn = QPushButton("Open Folder")
-        open_btn.setFixedHeight(24)
+        open_btn.setFixedHeight(28)
         open_btn.setToolTip("Open orphan folder in Windows Explorer")
         open_btn.clicked.connect(
             lambda _, d=disc: self._open_account_folder(d.device_id, d.username)
         )
 
         src_btn = QPushButton("Sources")
-        src_btn.setFixedHeight(24)
+        src_btn.setFixedHeight(28)
         has_sources = disc.data_db_exists or disc.sources_txt_exists
         src_btn.setEnabled(has_sources)
         src_btn.setToolTip(
@@ -1078,8 +1078,8 @@ class MainWindow(QMainWindow):
     def _wrap_btns(*btns: QPushButton) -> QWidget:
         wrapper = QWidget()
         lo = QHBoxLayout(wrapper)
-        lo.setContentsMargins(4, 2, 4, 2)
-        lo.setSpacing(4)
+        lo.setContentsMargins(4, 3, 4, 3)
+        lo.setSpacing(6)
         for btn in btns:
             lo.addWidget(btn)
         return wrapper
