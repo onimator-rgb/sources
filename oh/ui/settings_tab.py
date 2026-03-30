@@ -7,7 +7,7 @@ Groups:
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QGroupBox, QPushButton, QLabel, QDoubleSpinBox, QSpinBox,
+    QGroupBox, QPushButton, QLabel, QDoubleSpinBox, QSpinBox, QComboBox,
 )
 from PySide6.QtCore import Qt
 
@@ -79,6 +79,22 @@ class SettingsTab(QWidget):
 
         outer.addWidget(sc_group)
 
+        # -- Appearance group --
+        app_group = QGroupBox("Appearance")
+        app_form  = QFormLayout(app_group)
+        app_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._theme_combo = QComboBox()
+        self._theme_combo.addItems(["dark", "light"])
+        self._theme_combo.setFixedWidth(100)
+        self._theme_combo.setToolTip(
+            "Switch between dark and light mode.\n"
+            "Change takes effect after restarting OH."
+        )
+        app_form.addRow("Theme:", self._theme_combo)
+
+        outer.addWidget(app_group)
+
         # -- Save button --
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -100,10 +116,24 @@ class SettingsTab(QWidget):
         self._min_fbr_spin.setValue(min_fbr)
         self._delete_thresh_spin.setValue(self._settings.get_weak_source_threshold())
         self._min_src_spin.setValue(self._settings.get_min_source_count_warning())
+        current_theme = self._settings.get("theme") or "dark"
+        idx = self._theme_combo.findText(current_theme)
+        if idx >= 0:
+            self._theme_combo.setCurrentIndex(idx)
 
     def _save(self) -> None:
         self._settings.set("min_follows_threshold",        str(self._min_follows_spin.value()))
         self._settings.set("min_fbr_threshold",            str(self._min_fbr_spin.value()))
         self._settings.set("weak_source_delete_threshold", str(self._delete_thresh_spin.value()))
         self._settings.set("min_source_count_warning",     str(self._min_src_spin.value()))
-        self._status_label.setText("Settings saved.")
+
+        new_theme = self._theme_combo.currentText()
+        old_theme = self._settings.get("theme") or "dark"
+        self._settings.set("theme", new_theme)
+
+        if new_theme != old_theme:
+            self._status_label.setText(
+                f"Settings saved. Theme changed to '{new_theme}' — restart OH to apply."
+            )
+        else:
+            self._status_label.setText("Settings saved.")

@@ -13,7 +13,7 @@ import logging.handlers
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtGui import QPalette, QColor, QFont, QIcon
+from PySide6.QtGui import QFont, QIcon
 
 from oh.db.connection import get_connection, get_db_path, close_connection
 from oh.db.migrations import run_migrations
@@ -36,7 +36,7 @@ from oh.services.session_service import SessionService
 from oh.services.source_delete_service import SourceDeleteService
 from oh.resources import asset_path, asset_exists
 from oh.ui.main_window import MainWindow
-from oh.ui.style import get_stylesheet
+from oh.ui.style import get_stylesheet, apply_palette
 
 
 # ---------------------------------------------------------------------------
@@ -111,30 +111,6 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Palette
-# ---------------------------------------------------------------------------
-
-def apply_dark_palette(app: QApplication) -> None:
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window,          QColor(45, 45, 48))
-    palette.setColor(QPalette.ColorRole.WindowText,      QColor(220, 220, 220))
-    palette.setColor(QPalette.ColorRole.Base,            QColor(30, 30, 30))
-    palette.setColor(QPalette.ColorRole.AlternateBase,   QColor(40, 40, 43))
-    palette.setColor(QPalette.ColorRole.ToolTipBase,     QColor(25, 25, 25))
-    palette.setColor(QPalette.ColorRole.ToolTipText,     QColor(220, 220, 220))
-    palette.setColor(QPalette.ColorRole.Text,            QColor(220, 220, 220))
-    palette.setColor(QPalette.ColorRole.Button,          QColor(55, 55, 60))
-    palette.setColor(QPalette.ColorRole.ButtonText,      QColor(220, 220, 220))
-    palette.setColor(QPalette.ColorRole.BrightText,      QColor(255, 80, 80))
-    palette.setColor(QPalette.ColorRole.Link,            QColor(86, 156, 214))
-    palette.setColor(QPalette.ColorRole.Highlight,       QColor(0, 120, 212))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
-    palette.setColor(QPalette.ColorRole.Mid,             QColor(60, 60, 65))
-    palette.setColor(QPalette.ColorRole.Dark,            QColor(35, 35, 38))
-    app.setPalette(palette)
-
-
-# ---------------------------------------------------------------------------
 # Bootstrap
 # ---------------------------------------------------------------------------
 
@@ -177,7 +153,7 @@ def main() -> None:
     app.setStyle("Fusion")
 
     # Font
-    app.setFont(QFont("Segoe UI", 10))
+    app.setFont(QFont("Segoe UI", 11))
 
     try:
         conn = get_connection()
@@ -194,9 +170,10 @@ def main() -> None:
 
     settings_repo   = SettingsRepository(conn)
     theme = settings_repo.get("theme") or "dark"
-    if theme == "dark":
-        apply_dark_palette(app)
-    app.setStyleSheet(get_stylesheet())
+    if theme not in ("dark", "light"):
+        theme = "dark"
+    apply_palette(app, theme)
+    app.setStyleSheet(get_stylesheet(theme))
     logger.info(f"Theme: {theme}")
 
     # App icon (loaded from bundled assets — silently skipped if not yet generated)
