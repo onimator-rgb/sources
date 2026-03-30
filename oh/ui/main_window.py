@@ -278,8 +278,13 @@ class MainWindow(QMainWindow):
         lo.addWidget(title_lbl)
         lo.addStretch()
 
-        ver_lbl = QLabel("internal tool")
-        ver_lbl.setStyleSheet("color: #444; font-size: 9px;")
+        try:
+            from oh.version import BUILD_VERSION
+            ver_text = f"build {BUILD_VERSION}"
+        except ImportError:
+            ver_text = "dev"
+        ver_lbl = QLabel(ver_text)
+        ver_lbl.setStyleSheet("color: #555; font-size: 9px;")
         lo.addWidget(ver_lbl)
 
         return frame

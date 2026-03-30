@@ -164,8 +164,12 @@ def main() -> None:
     # Log whether we are running as a frozen .exe or from source
     import sys as _sys
     frozen = getattr(_sys, "frozen", False)
+    try:
+        from oh.version import BUILD_VERSION
+    except ImportError:
+        BUILD_VERSION = "dev"
     logger.info("=" * 60)
-    logger.info(f"OH — Operational Hub starting up ({'frozen .exe' if frozen else 'dev/source'})")
+    logger.info(f"OH — Operational Hub starting up ({'frozen .exe' if frozen else 'dev/source'})  build={BUILD_VERSION}")
     logger.info(f"Log directory: {log_dir}")
 
     app = QApplication(sys.argv)
