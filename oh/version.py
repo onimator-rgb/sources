@@ -6,6 +6,6 @@ to display which build is running — so operators can verify they
 have the latest .exe.
 """
 
-BUILD_VERSION = "2026-03-30_1855ade"
+BUILD_VERSION = "2026-03-30_eedb830"
 BUILD_DATE = "2026-03-30"
-BUILD_COMMIT = "1855ade"
+BUILD_COMMIT = "eedb830"

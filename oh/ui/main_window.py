@@ -98,19 +98,21 @@ COLUMN_HEADERS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Palette
+# Semantic palette — resolved at render time via sc()
 # ---------------------------------------------------------------------------
 
-C_ACTIVE   = QColor("#4caf7d")
-C_REMOVED  = QColor("#888888")
-C_YES      = QColor("#4caf7d")
-C_NO       = QColor("#e05555")
-C_WARN     = QColor("#e6a817")
-C_ORPHAN   = QColor("#cc8800")
-C_QUALITY  = QColor("#4caf7d")
-C_LOW_FBR  = QColor("#888888")
-C_ERROR    = QColor("#e05555")
-C_NEVER    = QColor("#e6a817")
+from oh.ui.style import sc
+
+def C_ACTIVE():   return sc("success")
+def C_REMOVED():  return sc("dimmed")
+def C_YES():      return sc("yes")
+def C_NO():       return sc("no")
+def C_WARN():     return sc("warning")
+def C_ORPHAN():   return sc("orphan")
+def C_QUALITY():  return sc("success")
+def C_LOW_FBR():  return sc("muted")
+def C_ERROR():    return sc("error")
+def C_NEVER():    return sc("warning")
 
 
 # ---------------------------------------------------------------------------
@@ -270,9 +272,11 @@ class MainWindow(QMainWindow):
                 )
 
         # Product name
-        title_lbl = QLabel("Wizzysocial  <span style='color:#555;font-size:9px;'>· OH Operational Hub</span>")
+        _sec = sc("text_secondary").name()
+        _hdg = sc("heading").name()
+        title_lbl = QLabel(f"Wizzysocial  <span style='color:{_sec};font-size:9px;'>&middot; OH Operational Hub</span>")
         title_lbl.setTextFormat(Qt.TextFormat.RichText)
-        title_lbl.setStyleSheet("color: #c0d8f0; font-size: 12px; font-weight: 600;")
+        title_lbl.setStyleSheet(f"color: {_hdg}; font-size: 12px; font-weight: 600;")
 
         lo.addWidget(logo_lbl)
         lo.addWidget(title_lbl)
@@ -284,7 +288,7 @@ class MainWindow(QMainWindow):
         except ImportError:
             ver_text = "dev"
         ver_lbl = QLabel(ver_text)
-        ver_lbl.setStyleSheet("color: #555; font-size: 9px;")
+        ver_lbl.setStyleSheet(f"color: {sc('muted').name()}; font-size: 9px;")
         lo.addWidget(ver_lbl)
 
         return frame
@@ -355,13 +359,13 @@ class MainWindow(QMainWindow):
         self._report_btn.clicked.connect(self._on_session_report)
 
         self._busy_label = QLabel("")
-        self._busy_label.setStyleSheet("font-style: italic; color: #aaa;")
+        self._busy_label.setStyleSheet(f"font-style: italic; color: {sc('text_secondary').name()};")
 
         self._last_sync_label = QLabel("")
         self._last_sync_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        self._last_sync_label.setStyleSheet("color: #777; font-size: 11px;")
+        self._last_sync_label.setStyleSheet(f"color: {sc('muted').name()}; font-size: 11px;")
 
         self._cockpit_btn = QPushButton("Cockpit")
         self._cockpit_btn.setFixedHeight(32)
@@ -500,7 +504,7 @@ class MainWindow(QMainWindow):
         lo.addStretch()
 
         self._count_label = QLabel("")
-        self._count_label.setStyleSheet("color: #777; font-size: 11px;")
+        self._count_label.setStyleSheet(f"color: {sc('muted').name()}; font-size: 11px;")
         lo.addWidget(self._count_label)
         return w
 
@@ -747,7 +751,7 @@ class MainWindow(QMainWindow):
             self._table.insertRow(0)
             msg = QTableWidgetItem("No accounts match the current filters.")
             msg.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            msg.setForeground(QColor("#777777"))
+            msg.setForeground(sc("muted"))
             self._table.setItem(0, 0, msg)
             self._table.setSpan(0, 0, 1, len(COLUMN_HEADERS))
             self._table.setSortingEnabled(True)
@@ -770,7 +774,7 @@ class MainWindow(QMainWindow):
         removed = not acc.is_active
         center  = Qt.AlignmentFlag.AlignCenter
 
-        status_color = C_ACTIVE if not removed else C_REMOVED
+        status_color = C_ACTIVE() if not removed else C_REMOVED()
         status_text  = "Active" if not removed else "Removed"
 
         disc_date = acc.discovered_at[:10] if acc.discovered_at else "—"
@@ -783,13 +787,13 @@ class MainWindow(QMainWindow):
         dev_status = self._device_status_map.get(acc.device_id)
         if dev_status == "running":
             dot = "\u25cf "  # filled circle
-            dot_color = C_YES    # green
+            dot_color = C_YES()    # green
         elif dev_status == "stop":
             dot = "\u25cf "
-            dot_color = C_REMOVED  # gray
+            dot_color = C_REMOVED()  # gray
         else:
             dot = "\u25cf "
-            dot_color = C_NO     # red — unknown/offline
+            dot_color = C_NO()     # red — unknown/offline
         device_item = self._make_item(dot + device_name, dimmed=removed)
         if not removed:
             device_item.setForeground(dot_color)
@@ -805,7 +809,7 @@ class MainWindow(QMainWindow):
         if op_tags:
             parts.append("OP:" + op_tags.replace(" | ", " OP:"))
         tags_text = " | ".join(parts) if parts else "\u2014"
-        tags_color = C_WARN if op_tags else None  # amber highlight if operator tags exist
+        tags_color = C_WARN() if op_tags else None  # amber highlight if operator tags exist
         self._table.setItem(row, COL_TAGS, self._make_item(
             tags_text, color=tags_color, dimmed=removed))
 
@@ -821,24 +825,24 @@ class MainWindow(QMainWindow):
         # Follow Today — red if 0 in active slot with follow enabled
         ft_color = None
         if not removed and acc.follow_enabled and follow_today == 0 and sess is not None:
-            ft_color = C_NO
+            ft_color = C_NO()
         elif follow_today > 0:
-            ft_color = C_YES
+            ft_color = C_YES()
         ft_item = _SortableItem(str(follow_today) if sess else "—", follow_today if sess else -1)
         ft_item.setTextAlignment(center)
         if removed:
-            ft_item.setForeground(C_REMOVED)
+            ft_item.setForeground(C_REMOVED())
         elif ft_color:
             ft_item.setForeground(ft_color)
         self._table.setItem(row, COL_FOLLOW_TODAY, ft_item)
 
         # Like Today — neutral rendering (no red for 0 — we can't distinguish
         # accounts without like flow enabled from those that failed)
-        lt_color = C_YES if like_today > 0 else None
+        lt_color = C_YES() if like_today > 0 else None
         lt_item = _SortableItem(str(like_today) if sess else "—", like_today if sess else -1)
         lt_item.setTextAlignment(center)
         if removed:
-            lt_item.setForeground(C_REMOVED)
+            lt_item.setForeground(C_REMOVED())
         elif lt_color:
             lt_item.setForeground(lt_color)
         self._table.setItem(row, COL_LIKE_TODAY, lt_item)
@@ -851,7 +855,7 @@ class MainWindow(QMainWindow):
 
         # Review flag
         review_text = "!" if acc.review_flag else ""
-        review_color = C_WARN if acc.review_flag else None
+        review_color = C_WARN() if acc.review_flag else None
         self._table.setItem(row, COL_REVIEW, self._make_item(
             review_text, center, review_color, dimmed=removed))
 
@@ -865,9 +869,9 @@ class MainWindow(QMainWindow):
             src_count = self._source_count_map.get(acc.id, 0)
             min_warn  = self._settings.get_min_source_count_warning()
             if removed:
-                src_color = C_REMOVED
+                src_color = C_REMOVED()
             elif src_count < min_warn:
-                src_color = C_WARN
+                src_color = C_WARN()
             else:
                 src_color = None
             src_item = _SortableItem(str(src_count), src_count)
@@ -921,7 +925,7 @@ class MainWindow(QMainWindow):
 
         self._table.setItem(row, COL_USERNAME,    self._make_item(disc.username))
         self._table.setItem(row, COL_DEVICE,      self._make_item(disc.device_name))
-        self._table.setItem(row, COL_STATUS,      self._make_item("Orphan", center, C_ORPHAN))
+        self._table.setItem(row, COL_STATUS,      self._make_item("Orphan", center, C_ORPHAN()))
         self._table.setItem(row, COL_TAGS,        self._make_item(disc.bot_tags_raw or "—", center))
         self._table.setItem(row, COL_FOLLOW,      self._make_item("—", center))
         self._table.setItem(row, COL_UNFOLLOW,    self._make_item("—", center))
@@ -985,44 +989,44 @@ class MainWindow(QMainWindow):
             item = _SortableItem(text, sort_key)
             item.setTextAlignment(center)
             if _dimmed:
-                item.setForeground(C_REMOVED)
+                item.setForeground(C_REMOVED())
             elif color:
                 item.setForeground(color)
             return item
 
         if snap is None:
             # Never analyzed — use amber to draw operator attention
-            self._table.setItem(row, COL_FBR_QUALITY, _si("—",     -2,   C_NEVER))
-            self._table.setItem(row, COL_FBR_BEST,    _si("—",     -2.0, C_NEVER))
-            self._table.setItem(row, COL_FBR_DATE,    _si("Never", "",   C_NEVER))
+            self._table.setItem(row, COL_FBR_QUALITY, _si("—",     -2,   C_NEVER()))
+            self._table.setItem(row, COL_FBR_BEST,    _si("—",     -2.0, C_NEVER()))
+            self._table.setItem(row, COL_FBR_DATE,    _si("Never", "",   C_NEVER()))
             return
 
         date_str  = snap.analyzed_at[:10] if snap.analyzed_at else "—"
         date_sort = snap.analyzed_at[:10] if snap.analyzed_at else ""
 
         if snap.status == SNAPSHOT_ERROR:
-            self._table.setItem(row, COL_FBR_QUALITY, _si("Error", -1,   C_ERROR))
+            self._table.setItem(row, COL_FBR_QUALITY, _si("Error", -1,   C_ERROR()))
             self._table.setItem(row, COL_FBR_BEST,    _si("—",     -1.0))
             self._table.setItem(row, COL_FBR_DATE,    _si(date_str, date_sort))
             return
 
         if snap.total_sources == 0:
             # Empty result — data.db exists but no qualifying source rows
-            self._table.setItem(row, COL_FBR_QUALITY, _si("0/0", 0,    C_LOW_FBR))
+            self._table.setItem(row, COL_FBR_QUALITY, _si("0/0", 0,    C_LOW_FBR()))
             self._table.setItem(row, COL_FBR_BEST,    _si("—",   -1.0))
             self._table.setItem(row, COL_FBR_DATE,    _si(date_str, date_sort))
             return
 
         # Normal case: 'ok' status with data
         quality_text  = f"{snap.quality_sources}/{snap.total_sources}"
-        quality_color = C_QUALITY if snap.quality_sources > 0 else C_LOW_FBR
+        quality_color = C_QUALITY() if snap.quality_sources > 0 else C_LOW_FBR()
         self._table.setItem(
             row, COL_FBR_QUALITY,
             _si(quality_text, snap.quality_sources, quality_color, _dimmed=dimmed),
         )
 
         if snap.best_fbr_pct is not None:
-            fbr_color = C_QUALITY if snap.quality_sources > 0 else C_LOW_FBR
+            fbr_color = C_QUALITY() if snap.quality_sources > 0 else C_LOW_FBR()
             self._table.setItem(
                 row, COL_FBR_BEST,
                 _si(f"{snap.best_fbr_pct:.1f}%", snap.best_fbr_pct, fbr_color, _dimmed=dimmed),
@@ -1049,7 +1053,7 @@ class MainWindow(QMainWindow):
         i = QTableWidgetItem(text)
         i.setTextAlignment(align)
         if dimmed:
-            i.setForeground(C_REMOVED)
+            i.setForeground(C_REMOVED())
         elif color:
             i.setForeground(color)
         return i
@@ -1064,7 +1068,7 @@ class MainWindow(QMainWindow):
             i.setTextAlignment(center)
             return i
         text = "Yes" if val else "No"
-        col  = C_REMOVED if dimmed else (C_YES if val else C_NO)
+        col  = C_REMOVED() if dimmed else (C_YES() if val else C_NO())
         i = QTableWidgetItem(text)
         i.setTextAlignment(center)
         i.setForeground(col)

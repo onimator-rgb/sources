@@ -30,15 +30,24 @@ from oh.models.recommendation import (
     REC_LIMITS_MAX, REC_TB_MAX, REC_ZERO_ACTION,
     REC_TYPE_LABELS, TARGET_ACCOUNT, TARGET_SOURCE,
 )
+from oh.ui.style import sc
 
 logger = logging.getLogger(__name__)
 
-_SEV_COLORS = {
-    SEV_CRITICAL: QColor("#e05555"),
-    SEV_HIGH:     QColor("#e6a817"),
-    SEV_MEDIUM:   QColor("#86c5f0"),
-    SEV_LOW:      QColor("#888888"),
-}
+
+def _sev_colors():
+    return {
+        SEV_CRITICAL: sc("critical"),
+        SEV_HIGH:     sc("high"),
+        SEV_MEDIUM:   sc("medium"),
+        SEV_LOW:      sc("low"),
+    }
+
+def _del_status_colors():
+    return {
+        "completed": sc("success"),
+        "reverted":  sc("muted"),
+    }
 
 _OP_ACTION_LABELS = {
     "set_review":       "Set Review",
@@ -49,10 +58,6 @@ _OP_ACTION_LABELS = {
     "increment_limits": "Limits +1",
 }
 
-_DEL_STATUS_COLORS = {
-    "completed": QColor("#4caf7d"),
-    "reverted":  QColor("#888888"),
-}
 
 # Short action commands for section A
 _SHORT_ACTIONS = {
@@ -120,13 +125,13 @@ class CockpitDialog(QDialog):
 
         self._summary = QLabel()
         self._summary.setStyleSheet(
-            "font-size: 14px; color: #c0d8f0; font-weight: bold;"
+            f"font-size: 14px; color: {sc('heading').name()}; font-weight: bold;"
         )
         outer.addWidget(self._summary)
 
         # Status feedback
         self._status = QLabel("")
-        self._status.setStyleSheet("color: #4caf7d; font-size: 11px;")
+        self._status.setStyleSheet(f"color: {sc('status_ok').name()}; font-size: 11px;")
         outer.addWidget(self._status)
 
         scroll = QScrollArea()
@@ -198,7 +203,7 @@ class CockpitDialog(QDialog):
         rows = []
         for r in self._urgent_items:
             rows.append([
-                (r.severity, _SEV_COLORS.get(r.severity)),
+                (r.severity, _sev_colors().get(r.severity)),
                 (REC_TYPE_LABELS.get(r.rec_type, r.rec_type), None),
                 (_fmt_target(r), None),
                 (_SHORT_ACTIONS.get(r.rec_type, r.suggested_action), None),
@@ -298,7 +303,7 @@ class CockpitDialog(QDialog):
         rows = []
         for r in self._recs_items:
             rows.append([
-                (r.severity, _SEV_COLORS.get(r.severity)),
+                (r.severity, _sev_colors().get(r.severity)),
                 (REC_TYPE_LABELS.get(r.rec_type, r.rec_type), None),
                 (_fmt_target(r), None),
                 (_fmt_reason(r), None),
@@ -340,7 +345,7 @@ class CockpitDialog(QDialog):
                 (d.scope, None),
                 (str(d.total_sources), None),
                 (str(d.total_accounts_affected), None),
-                (d.status, _DEL_STATUS_COLORS.get(d.status)),
+                (d.status, _del_status_colors().get(d.status)),
             ])
 
         frame, _ = self._make_section(
@@ -395,7 +400,7 @@ class CockpitDialog(QDialog):
         """
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
-        border_color = "#553333" if highlight else "#333"
+        border_color = sc("border_urgent").name() if highlight else sc("border").name()
         frame.setStyleSheet(
             f"QFrame {{ border: 1px solid {border_color}; border-radius: 4px; }}"
         )
@@ -407,7 +412,7 @@ class CockpitDialog(QDialog):
         # Header
         hdr = QHBoxLayout()
         lbl = QLabel(title)
-        title_color = "#e05555" if highlight else "#c0d8f0"
+        title_color = sc("heading_urgent").name() if highlight else sc("heading").name()
         lbl.setStyleSheet(
             f"font-size: 12px; font-weight: bold; color: {title_color}; border: none;"
         )
@@ -421,7 +426,7 @@ class CockpitDialog(QDialog):
                 btn = QPushButton(btn_label)
                 btn.setFixedHeight(22)
                 btn.setStyleSheet(
-                    "border: none; color: #86c5f0; font-size: 10px; padding: 0 6px;"
+                    f"border: none; color: {sc('link').name()}; font-size: 10px; padding: 0 6px;"
                 )
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn.clicked.connect(btn_cb)
@@ -431,7 +436,7 @@ class CockpitDialog(QDialog):
         if not rows:
             e = QLabel(empty_msg)
             e.setStyleSheet(
-                "color: #4caf7d; font-style: italic; padding: 8px; border: none;"
+                f"color: {sc('status_ok').name()}; font-style: italic; padding: 8px; border: none;"
             )
             lo.addWidget(e)
             return frame, None

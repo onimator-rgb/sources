@@ -27,15 +27,18 @@ from oh.models.recommendation import (
     SEV_CRITICAL, SEV_HIGH, SEV_MEDIUM, SEV_LOW,
     TARGET_SOURCE, TARGET_ACCOUNT,
 )
+from oh.ui.style import sc
 
 logger = logging.getLogger(__name__)
 
-_SEV_COLORS = {
-    SEV_CRITICAL: QColor("#e05555"),
-    SEV_HIGH:     QColor("#e6a817"),
-    SEV_MEDIUM:   QColor("#86c5f0"),
-    SEV_LOW:      QColor("#888888"),
-}
+
+def _sev_colors():
+    return {
+        SEV_CRITICAL: sc("critical"),
+        SEV_HIGH:     sc("high"),
+        SEV_MEDIUM:   sc("medium"),
+        SEV_LOW:      sc("low"),
+    }
 
 _HEADERS = ["Severity", "Type", "Target", "Reason", "Action"]
 
@@ -87,7 +90,7 @@ class RecommendationsDialog(QDialog):
 
         # Summary header
         self._summary = QLabel()
-        self._summary.setStyleSheet("font-size: 13px; color: #c0d8f0;")
+        self._summary.setStyleSheet(f"font-size: 13px; color: {sc('heading').name()};")
         lo.addWidget(self._summary)
 
         # Filter bar
@@ -128,7 +131,7 @@ class RecommendationsDialog(QDialog):
 
         # Status + Buttons
         self._status = QLabel("")
-        self._status.setStyleSheet("color: #4caf7d; font-size: 11px;")
+        self._status.setStyleSheet(f"color: {sc('status_ok').name()}; font-size: 11px;")
 
         btn_lo = QHBoxLayout()
         btn_lo.addWidget(self._status, stretch=1)
@@ -144,8 +147,8 @@ class RecommendationsDialog(QDialog):
             del_src_btn.setFixedHeight(28)
             del_src_btn.setToolTip("Delete the selected weak source globally")
             del_src_btn.setStyleSheet(
-                "QPushButton { color: #e05555; }"
-                "QPushButton:hover { background: #3a1a1a; }"
+                f"QPushButton {{ color: {sc('error').name()}; }}"
+                "QPushButton:hover { background: rgba(200,60,60,30); }"
             )
             del_src_btn.clicked.connect(self._on_delete_source_clicked)
             btn_lo.addWidget(del_src_btn)
@@ -155,8 +158,8 @@ class RecommendationsDialog(QDialog):
             clean_btn.setFixedHeight(28)
             clean_btn.setToolTip("Remove non-quality sources from selected account")
             clean_btn.setStyleSheet(
-                "QPushButton { color: #e6a817; }"
-                "QPushButton:hover { background: #3a2e00; }"
+                f"QPushButton {{ color: {sc('warning').name()}; }}"
+                "QPushButton:hover { background: rgba(200,160,40,30); }"
             )
             clean_btn.clicked.connect(self._on_clean_account_clicked)
             btn_lo.addWidget(clean_btn)
@@ -230,7 +233,7 @@ class RecommendationsDialog(QDialog):
             self._table.insertRow(r)
 
             cells = [
-                (rec.severity, _SEV_COLORS.get(rec.severity)),
+                (rec.severity, _sev_colors().get(rec.severity)),
                 (REC_TYPE_LABELS.get(rec.rec_type, rec.rec_type), None),
                 (_fmt_target(rec), None),
                 (_fmt_reason(rec), None),

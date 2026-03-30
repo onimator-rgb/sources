@@ -36,7 +36,7 @@ from oh.services.session_service import SessionService
 from oh.services.source_delete_service import SourceDeleteService
 from oh.resources import asset_path, asset_exists
 from oh.ui.main_window import MainWindow
-from oh.ui.style import get_stylesheet, apply_palette
+from oh.ui.style import get_stylesheet, apply_palette, set_current_theme
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +172,7 @@ def main() -> None:
     theme = settings_repo.get("theme") or "dark"
     if theme not in ("dark", "light"):
         theme = "dark"
+    set_current_theme(theme)
     apply_palette(app, theme)
     app.setStyleSheet(get_stylesheet(theme))
     logger.info(f"Theme: {theme}")

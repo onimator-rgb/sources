@@ -27,21 +27,24 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 from oh.models.session import slot_for_times
+from oh.ui.style import sc
 
 logger = logging.getLogger(__name__)
 
-C_CRITICAL = QColor("#e05555")
-C_HIGH     = QColor("#e6a817")
-C_MEDIUM   = QColor("#86c5f0")
-C_LOW      = QColor("#888888")
-C_GREEN    = QColor("#4caf7d")
 
-_SEV_COLORS = {
-    "CRITICAL": C_CRITICAL,
-    "HIGH":     C_HIGH,
-    "MEDIUM":   C_MEDIUM,
-    "LOW":      C_LOW,
-}
+def C_CRITICAL(): return sc("critical")
+def C_HIGH():     return sc("high")
+def C_MEDIUM():   return sc("medium")
+def C_LOW():      return sc("low")
+def C_GREEN():    return sc("success")
+
+def _sev_colors():
+    return {
+        "CRITICAL": C_CRITICAL(),
+        "HIGH":     C_HIGH(),
+        "MEDIUM":   C_MEDIUM(),
+        "LOW":      C_LOW(),
+    }
 _SEV_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 
 _TB_RE = re.compile(r"TB(\d)", re.IGNORECASE)
@@ -139,12 +142,12 @@ class SessionReportDialog(QDialog):
             f"{with_activity} with activity \u2014 "
             f"current hour: {self._current_hour}:00"
         )
-        header.setStyleSheet("font-size: 13px; color: #c0d8f0;")
+        header.setStyleSheet(f"font-size: 13px; color: {sc('heading').name()};")
         lo.addWidget(header)
 
         self._tabs = QTabWidget()
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("color: #4caf7d; font-size: 11px;")
+        self._status_label.setStyleSheet(f"color: {sc('status_ok').name()}; font-size: 11px;")
 
         self._rebuild_tabs()
 
@@ -678,7 +681,7 @@ class SessionReportDialog(QDialog):
 
         if not data:
             lbl = QLabel("No items in this section.")
-            lbl.setStyleSheet("color: #4caf7d; font-style: italic; padding: 20px;")
+            lbl.setStyleSheet(f"color: {sc('status_ok').name()}; font-style: italic; padding: 20px;")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lo.addWidget(lbl)
             return w
@@ -717,12 +720,12 @@ class SessionReportDialog(QDialog):
         for r, row_data in enumerate(data):
             for c, val in enumerate(row_data):
                 item = QTableWidgetItem(str(val))
-                if headers[c] == "Severity" and val in _SEV_COLORS:
-                    item.setForeground(_SEV_COLORS[val])
+                if headers[c] == "Severity" and val in _sev_colors():
+                    item.setForeground(_sev_colors()[val])
                 if val == "HARDWARE":
-                    item.setForeground(C_CRITICAL)
+                    item.setForeground(C_CRITICAL())
                 if val == "offline":
-                    item.setForeground(C_HIGH)
+                    item.setForeground(C_HIGH())
                 t.setItem(r, c, item)
         t.setSortingEnabled(True)
         t.resizeRowsToContents()
