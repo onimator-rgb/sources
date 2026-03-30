@@ -237,6 +237,17 @@ CREATE INDEX IF NOT EXISTS idx_delete_items_source
 """
 
 # ---------------------------------------------------------------------------
+# Migration 005 — delete revert support
+# ---------------------------------------------------------------------------
+
+_MIGRATION_005_SQL = """
+ALTER TABLE source_delete_actions ADD COLUMN status TEXT NOT NULL DEFAULT 'completed';
+ALTER TABLE source_delete_actions ADD COLUMN reverted_at TEXT;
+ALTER TABLE source_delete_actions ADD COLUMN revert_of_action_id INTEGER;
+ALTER TABLE source_delete_items ADD COLUMN affected_details_json TEXT
+"""
+
+# ---------------------------------------------------------------------------
 # Registry — append new entries here, never modify existing ones
 # ---------------------------------------------------------------------------
 
@@ -245,6 +256,7 @@ _MIGRATIONS: List[Tuple[int, str, str]] = [
     (2, "fbr_snapshots",        _MIGRATION_002_SQL),
     (3, "source_assignments",   _MIGRATION_003_SQL),
     (4, "delete_history",       _MIGRATION_004_SQL),
+    (5, "delete_revert_support", _MIGRATION_005_SQL),
 ]
 
 

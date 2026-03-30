@@ -288,3 +288,22 @@ class SourceAssignmentRepository:
             (now, account_id, source_name.strip()),
         )
         self._conn.commit()
+
+    def mark_source_active(self, account_id: int, source_name: str) -> None:
+        """
+        Mark a single account-source pair as active (is_active=1).
+        Called after SourceRestorer successfully adds the source back to sources.txt.
+        Creates the row if it does not exist.
+        """
+        now = _utcnow()
+        self._conn.execute(
+            """
+            INSERT INTO source_assignments (account_id, source_name, is_active, updated_at)
+            VALUES (?, ?, 1, ?)
+            ON CONFLICT(account_id, source_name) DO UPDATE SET
+                is_active  = 1,
+                updated_at = excluded.updated_at
+            """,
+            (account_id, source_name.strip(), now),
+        )
+        self._conn.commit()

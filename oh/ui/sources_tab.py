@@ -775,13 +775,26 @@ class SourcesTab(QWidget):
 
     def _on_show_history(self) -> None:
         if self._history_dialog is None or not self._history_dialog.isVisible():
+            def _handle_revert(action_id):
+                if not self._bot_root:
+                    raise ValueError("Bot root not set")
+                return self._delete_svc.revert_action(action_id, self._bot_root)
+
             self._history_dialog = DeleteHistoryDialog(
-                self._delete_svc.history_repo, parent=self
+                self._delete_svc.history_repo,
+                on_revert=_handle_revert,
+                parent=self,
             )
+            self._history_dialog.finished.connect(self._on_history_closed)
             self._history_dialog.show()
         else:
             self._history_dialog.raise_()
             self._history_dialog.activateWindow()
+
+    def _on_history_closed(self) -> None:
+        """Reload sources tab data after history dialog closes (revert may have changed data)."""
+        self.load_data()
+        self._request_accounts_refresh()
 
     def _request_accounts_refresh(self) -> None:
         """Signal the main window to refresh account source counts."""

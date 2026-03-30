@@ -18,12 +18,13 @@ Table columns:
   Source | Status | sources.txt | data.db | Follows | Follow-backs | FBR% | Quality | Used | Used %
 """
 import logging
-from typing import Optional
+from typing import Optional, Callable
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QPushButton, QFrame, QWidget,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -105,12 +106,14 @@ class SourceDialog(QDialog):
         inspection: SourceInspectionResult,
         fbr: FBRAnalysisResult,
         usage: Optional[SourceUsageResult] = None,
+        on_delete: Optional[Callable] = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._inspection = inspection
         self._fbr = fbr
         self._usage = usage
+        self._on_delete = on_delete
 
         # Pre-build FBR lookup keyed by normalized (strip + lower) name so that
         # minor casing/whitespace differences between sources.txt and data.db
@@ -178,8 +181,14 @@ class SourceDialog(QDialog):
         if not self._inspection.has_data:
             layout.addWidget(self._make_empty_state(), stretch=1)
         else:
-            layout.addWidget(self._make_table(), stretch=1)
+            self._source_table = self._make_table()
+            layout.addWidget(self._source_table, stretch=1)
             layout.addWidget(self._make_legend())
+            # Enable delete button when a row is selected
+            if self._on_delete is not None:
+                self._source_table.selectionModel().selectionChanged.connect(
+                    self._on_table_selection_changed
+                )
 
         layout.addWidget(self._make_footer())
 
@@ -558,12 +567,87 @@ class SourceDialog(QDialog):
         w = QWidget()
         lo = QHBoxLayout(w)
         lo.setContentsMargins(0, 4, 0, 0)
+
+        if self._on_delete is not None:
+            self._delete_btn = QPushButton("Delete Selected Source")
+            self._delete_btn.setFixedWidth(180)
+            self._delete_btn.setEnabled(False)
+            self._delete_btn.setStyleSheet(
+                "QPushButton:enabled { color: #e05555; }"
+                "QPushButton:enabled:hover { background: #3a1a1a; }"
+            )
+            self._delete_btn.clicked.connect(self._on_delete_clicked)
+            lo.addWidget(self._delete_btn)
+
         lo.addStretch()
         close_btn = QPushButton("Close")
         close_btn.setFixedWidth(80)
         close_btn.clicked.connect(self.accept)
         lo.addWidget(close_btn)
         return w
+
+    def _on_table_selection_changed(self) -> None:
+        """Enable/disable the Delete button based on table selection."""
+        if not hasattr(self, "_delete_btn"):
+            return
+        selected = self._source_table.selectedItems()
+        self._delete_btn.setEnabled(bool(selected))
+
+    def _on_delete_clicked(self) -> None:
+        """Handle Delete Selected Source button click."""
+        if self._on_delete is None:
+            return
+
+        selected = self._source_table.selectedItems()
+        if not selected:
+            return
+
+        row = selected[0].row()
+        source_item = self._source_table.item(row, COL_SOURCE)
+        if not source_item:
+            return
+
+        source_name = source_item.text()
+        if not source_name:
+            return
+
+        self._delete_btn.setEnabled(False)
+        try:
+            result = self._on_delete(source_name)
+            if result is None:
+                return  # user cancelled confirmation
+            if result.accounts_removed > 0:
+                # Gray out the deleted row
+                for col in range(self._source_table.columnCount()):
+                    cell = self._source_table.item(row, col)
+                    if cell:
+                        cell.setForeground(_C_LOW_FBR)
+                source_item.setText(f"{source_name}  (deleted)")
+                QMessageBox.information(
+                    self,
+                    "Source Deleted",
+                    f"'{source_name}' removed from this account.\n"
+                    "This action can be reverted from History in the Sources tab.",
+                )
+            elif result.accounts_not_found > 0:
+                QMessageBox.information(
+                    self,
+                    "Source Already Absent",
+                    f"'{source_name}' was not found in sources.txt.\n"
+                    "It may have been removed externally.",
+                )
+            elif result.errors:
+                QMessageBox.warning(
+                    self,
+                    "Delete Failed",
+                    f"Could not delete '{source_name}':\n\n" + "\n".join(result.errors),
+                )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Delete Error",
+                f"Error deleting '{source_name}':\n\n{e}",
+            )
 
 
 # ---------------------------------------------------------------------------

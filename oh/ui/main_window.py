@@ -149,6 +149,7 @@ class MainWindow(QMainWindow):
         self._scan_service            = scan_service
         self._fbr_service             = fbr_service
         self._global_sources_service  = global_sources_service
+        self._source_delete_service   = source_delete_service
         self._settings                = SettingsRepository(conn)
         self._accounts                = AccountRepository(conn)
         self._sync_repo               = SyncRepository(conn)
@@ -1089,8 +1090,24 @@ class MainWindow(QMainWindow):
                 account_username=username, device_id=device_id
             )
 
+        # Build the delete callback for single-account deletion
+        def _handle_account_delete(src_name: str):
+            from oh.ui.delete_confirm_dialog import DeleteConfirmDialog
+            short_device = device_id[:10] + "..." if len(device_id) > 10 else device_id
+            dlg = DeleteConfirmDialog.for_single_account(
+                src_name, username, short_device, parent=self
+            )
+            if dlg.exec() != DeleteConfirmDialog.DialogCode.Accepted:
+                return None
+            return self._source_delete_service.delete_source_for_account(
+                src_name, account_id, device_id, username,
+                short_device, bot_root
+            )
+
+        on_delete = _handle_account_delete if account_id is not None else None
+
         self._set_status("Ready.")
-        dlg = SourceDialog(inspection, fbr_result, usage_result, parent=self)
+        dlg = SourceDialog(inspection, fbr_result, usage_result, on_delete=on_delete, parent=self)
         dlg.exec()
 
         # Repopulate table so updated FBR cells are visible immediately

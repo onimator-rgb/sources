@@ -41,8 +41,9 @@ class DeleteHistoryRepository:
             INSERT INTO source_delete_actions (
                 deleted_at, delete_type, scope,
                 total_sources, total_accounts_affected,
-                threshold_pct, machine, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                threshold_pct, machine, notes,
+                status, revert_of_action_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 action.deleted_at or _utcnow(),
@@ -53,6 +54,8 @@ class DeleteHistoryRepository:
                 action.threshold_pct,
                 action.machine,
                 action.notes,
+                action.status or "completed",
+                action.revert_of_action_id,
             ),
         )
         action_id = cursor.lastrowid
@@ -63,8 +66,9 @@ class DeleteHistoryRepository:
                 """
                 INSERT INTO source_delete_items (
                     action_id, source_name, affected_accounts_json,
-                    files_removed, files_not_found, files_failed, errors_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    files_removed, files_not_found, files_failed, errors_json,
+                    affected_details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -75,6 +79,7 @@ class DeleteHistoryRepository:
                         item.files_not_found,
                         item.files_failed,
                         json.dumps(item.errors) if item.errors else None,
+                        json.dumps(item.affected_details) if item.affected_details else None,
                     )
                     for item in items
                 ],
@@ -113,8 +118,33 @@ class DeleteHistoryRepository:
     # Internal
     # ------------------------------------------------------------------
 
+    def get_action_with_items(self, action_id: int) -> Optional[DeleteAction]:
+        """Load one action with all its items attached."""
+        row = self._conn.execute(
+            "SELECT * FROM source_delete_actions WHERE id = ?",
+            (action_id,),
+        ).fetchone()
+        if not row:
+            return None
+        action = self._action_from_row(row)
+        action.items = self.get_items_for_action(action_id)
+        return action
+
+    def mark_reverted(self, action_id: int) -> None:
+        """Set the status of an action to 'reverted'."""
+        self._conn.execute(
+            """
+            UPDATE source_delete_actions
+            SET status = 'reverted', reverted_at = ?
+            WHERE id = ?
+            """,
+            (_utcnow(), action_id),
+        )
+        self._conn.commit()
+
     @staticmethod
     def _action_from_row(row: sqlite3.Row) -> DeleteAction:
+        keys = row.keys() if hasattr(row, "keys") else []
         return DeleteAction(
             id=row["id"],
             deleted_at=row["deleted_at"],
@@ -125,15 +155,21 @@ class DeleteHistoryRepository:
             threshold_pct=row["threshold_pct"],
             machine=row["machine"],
             notes=row["notes"],
+            status=row["status"] if "status" in keys else "completed",
+            reverted_at=row["reverted_at"] if "reverted_at" in keys else None,
+            revert_of_action_id=row["revert_of_action_id"] if "revert_of_action_id" in keys else None,
         )
 
     @staticmethod
     def _item_from_row(row: sqlite3.Row) -> DeleteItem:
+        keys = row.keys() if hasattr(row, "keys") else []
+        details_raw = row["affected_details_json"] if "affected_details_json" in keys else None
         return DeleteItem(
             id=row["id"],
             action_id=row["action_id"],
             source_name=row["source_name"],
             affected_accounts=json.loads(row["affected_accounts_json"] or "[]"),
+            affected_details=json.loads(details_raw) if details_raw else [],
             files_removed=row["files_removed"],
             files_not_found=row["files_not_found"],
             files_failed=row["files_failed"],

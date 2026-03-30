@@ -60,6 +60,32 @@ class DeleteConfirmDialog(QDialog):
         dlg._build_bulk(threshold_pct, sources)
         return dlg
 
+    @classmethod
+    def for_single_account(
+        cls,
+        source_name: str,
+        username: str,
+        device_name: str,
+        parent=None,
+    ) -> "DeleteConfirmDialog":
+        dlg = cls(parent)
+        dlg.setWindowTitle("Confirm Source Deletion")
+        dlg._build_single_account(source_name, username, device_name)
+        return dlg
+
+    @classmethod
+    def for_revert(
+        cls,
+        action_id: int,
+        source_names: list[str],
+        account_count: int,
+        parent=None,
+    ) -> "DeleteConfirmDialog":
+        dlg = cls(parent)
+        dlg.setWindowTitle("Confirm Revert")
+        dlg._build_revert(action_id, source_names, account_count)
+        return dlg
+
     # ------------------------------------------------------------------
     # UI builders
     # ------------------------------------------------------------------
@@ -159,6 +185,85 @@ class DeleteConfirmDialog(QDialog):
         ))
 
         lo.addLayout(self._button_row(f"Delete {len(sources)} Source(s)"))
+
+    def _build_single_account(
+        self,
+        source_name: str,
+        username: str,
+        device_name: str,
+    ) -> None:
+        lo = QVBoxLayout(self)
+        lo.setSpacing(12)
+
+        lo.addWidget(self._warning_label(
+            f'Delete source:  "{source_name}"'
+        ))
+
+        lo.addWidget(QLabel(
+            f"This will remove <b>{source_name}</b> from <b>sources.txt</b> "
+            f"for account <b>{username}</b> on device <b>{device_name}</b> only."
+        ))
+
+        lo.addWidget(self._note(
+            "This affects only this one account, not other accounts using the same source.\n"
+            "data.db (follow history) is NOT modified.\n"
+            "A backup (sources.txt.bak) will be created before the file write.\n"
+            "This action can be reverted from the deletion history."
+        ))
+
+        lo.addLayout(self._button_row(f"Delete from {username}"))
+
+    def _build_revert(
+        self,
+        action_id: int,
+        source_names: list[str],
+        account_count: int,
+    ) -> None:
+        lo = QVBoxLayout(self)
+        lo.setSpacing(12)
+
+        lbl = QLabel(f"Revert delete action #{action_id}")
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(11)
+        lbl.setFont(font)
+        lbl.setStyleSheet("color: #4caf7d;")
+        lo.addWidget(lbl)
+
+        sources_preview = ", ".join(source_names[:5])
+        if len(source_names) > 5:
+            sources_preview += f" ... (+{len(source_names) - 5})"
+
+        lo.addWidget(QLabel(
+            f"This will restore <b>{len(source_names)} source(s)</b> to "
+            f"<b>sources.txt</b> on up to <b>{account_count} account(s)</b>."
+            f"<br><br>Sources: {sources_preview}"
+        ))
+
+        lo.addWidget(self._note(
+            "Sources will be added back to sources.txt for accounts where they were removed.\n"
+            "If a source is already present in an account's file, it will be skipped.\n"
+            "A backup (sources.txt.bak) will be created before each file write."
+        ))
+
+        confirm_btn_text = f"Restore {len(source_names)} source(s)"
+        # Use green confirm style for restore
+        row_lo = QHBoxLayout()
+        row_lo.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(28)
+        cancel_btn.setDefault(True)
+        cancel_btn.clicked.connect(self.reject)
+        row_lo.addWidget(cancel_btn)
+        confirm_btn = QPushButton(confirm_btn_text)
+        confirm_btn.setFixedHeight(28)
+        confirm_btn.setStyleSheet(
+            "QPushButton { background: #1a6b3a; color: white; border-radius: 3px; }"
+            "QPushButton:hover { background: #20a050; }"
+        )
+        confirm_btn.clicked.connect(self.accept)
+        row_lo.addWidget(confirm_btn)
+        lo.addLayout(row_lo)
 
     # ------------------------------------------------------------------
     # Helpers

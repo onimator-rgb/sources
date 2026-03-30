@@ -1,260 +1,253 @@
 # OH — Operational Hub
 
-Internal desktop tool for monitoring and managing Onimator bot operations at scale.
+> Desktop monitoring & management dashboard for Onimator bot operations at scale.
 
-OH connects to the Onimator bot directory, discovers all devices and accounts, and provides a unified view of account state, source assignments, FBR (Follow-Back Rate) analytics, and source consumption metrics — without touching the bot's runtime behaviour.
+OH connects to the Onimator bot directory and provides a unified view of all devices, accounts, source assignments, FBR analytics, and consumption metrics — **without modifying the bot's runtime behaviour**.
 
-## Why OH exists
+Built with **Python** and **PySide6 (Qt 6)** for Windows. Single-file `.exe` distribution via PyInstaller.
 
-Operating Onimator across many devices and accounts creates operational challenges:
+---
 
-- **Visibility** — Which accounts are active? Which sources are performing? Which are consuming resources with no return?
-- **Analytics** — FBR data exists inside per-account `data.db` files, but comparing it across 100+ accounts manually is impractical.
-- **Source management** — Removing underperforming sources from `sources.txt` for dozens of accounts by hand is error-prone and slow.
-- **Usage tracking** — Understanding how much of a source's audience has already been processed requires reading per-source SQLite databases across many accounts.
+## Problem
 
-OH solves these by aggregating data from the bot's file structure into a single, searchable desktop interface.
+Operating Onimator across many devices and accounts creates challenges that grow with scale:
+
+| Challenge | Manual approach | OH solution |
+|-----------|----------------|-------------|
+| **Visibility** | Open each device folder, check each account | Single table with all accounts, statuses, and configs |
+| **FBR Analytics** | Read `data.db` per account, compute manually | One-click batch analysis with quality thresholds |
+| **Source Management** | Edit `sources.txt` in dozens of folders | Global source view with single/bulk delete and revert |
+| **Usage Tracking** | Read per-source SQLite DBs across accounts | Aggregated Used count & Used % with drill-down |
+
+---
 
 ## Features
 
-### Account discovery and sync
-- Scans the Onimator bot root for device folders and account directories
-- Detects active accounts, orphan folders, and removed accounts
-- Reads per-account configuration (follow/unfollow limits, status, last seen)
-- Persists account state in OH's internal database for fast access
+### Account Discovery & Sync
+- Auto-discovers devices and accounts from bot folder structure
+- Tracks active, removed, and orphan accounts
+- Reads per-account configuration (follow/unfollow limits, status)
+- Persistent account registry with sync history
 
-### Source inspection
-- Reads `sources.txt` (active sources) and `data.db` (historical sources) per account
-- Merges and deduplicates with case-insensitive normalization
-- Shows file presence, assignment status, and source history
-
-### FBR analytics
+### FBR Analytics
 - Computes Follow-Back Rate per source per account from `data.db`
 - Configurable quality thresholds (min follows, min FBR %)
-- Anomaly detection (followback count > follow count)
+- Anomaly detection (followback > follow count)
 - Persisted snapshots for historical comparison
 - Batch analysis across all active accounts
 
-### Source usage metrics
-- **Used count** — reads `sources/{name}.db` for each account to count processed users
-- **Used %** — derives total source followers from `.stm/{name}-total-followed-percent.txt` to calculate consumption percentage
-- Shown per-account in the Sources dialog and in the global Sources detail pane
-
-### Global source aggregation
+### Global Source Aggregation
 - Cross-account view of every known source
-- Average FBR, weighted FBR, quality counts, assignment counts
-- Filterable by name, minimum active accounts, minimum follows, FBR status
-- Drill-down detail pane showing per-account metrics for any selected source
+- Average FBR, weighted FBR (by follow volume), quality counts
+- Filterable by name, active accounts, follows, FBR status
+- Drill-down detail pane with per-account metrics
 
-### Source deletion
-- Remove underperforming sources from `sources.txt` across all assigned accounts
-- Single-source delete or bulk delete (by FBR threshold)
+### Source Usage Metrics
+- **Used count** — processed users per source (from `sources/{name}.db`)
+- **Used %** — consumption percentage (derived from `.stm` files)
+- Shown per-account and in global detail pane
+
+### Source Deletion & Revert
+- Remove underperforming sources from `sources.txt` across accounts
+- Single-source, per-account, or bulk delete (by FBR threshold)
 - Confirmation dialog with affected account list
-- Full deletion history with timestamps
+- Full deletion history with audit trail
+- **Revert** — restore previously deleted sources with one click
 
-### Settings and configuration
-- Bot root path — the Onimator installation directory
-- FBR quality thresholds (minimum follows, minimum FBR %)
-- Delete threshold for bulk source cleanup
-- Theme selection
-- All settings persisted in OH's internal database
+### Per-Account Source Dialog
+- Merged view combining `sources.txt`, `data.db`, FBR, and usage data
+- 10-column table: Source, Status, sources.txt, data.db, Follows, Followbacks, FBR %, Quality, Used, Used %
+- Delete sources from individual accounts
 
-### Logging
-- Rotating log file at `%APPDATA%\OH\logs\oh.log`
-- 2 MB per file, 5 backups (10 MB max)
-- DEBUG level to file, INFO level to console
-- Structured `[SourceUsage]`, `[UsedPct]`, `[Sources]` prefixes for traceability
-- Unhandled exception logging
+---
 
-## UI Layout
+## UI Overview
 
 | Tab | Purpose |
-|---|---|
-| **Accounts** | Master account list with status, FBR summary, source counts, and per-account actions |
-| **Sources** | Global source aggregation table with filters, detail pane, delete actions, and history |
-| **Settings** | Bot root path, FBR thresholds, theme, and delete configuration |
+|-----|---------|
+| **Accounts** | Master account list — status, FBR summary, source counts, per-account actions |
+| **Sources** | Global source aggregation — filters, detail pane, delete/revert, history |
+| **Settings** | Bot root path, FBR thresholds, delete config, theme |
 
-### Per-account Sources dialog
+---
 
-Opened from the Accounts tab via the "Sources" button on any account row. Shows a merged table of all sources for that account with columns:
+## Quick Start
 
-`Source | Status | sources.txt | data.db | Follows | Follow-backs | FBR % | Quality | Used | Used %`
-
-## Requirements
-
+### Requirements
 - Python 3.9+
-- Windows 10/11 (tested on Windows 11 Pro)
+- Windows 10/11
 
-### Python dependencies
-
-```
-PySide6>=6.6.0
-```
-
-No other external dependencies. OH uses only the Python standard library (`sqlite3`, `logging`, `pathlib`, etc.) beyond PySide6.
-
-## Setup
+### Setup
 
 ```bash
-# Clone the repository
 git clone https://github.com/onimator-rgb/sources.git
 cd sources
 
-# Create a virtual environment (recommended)
 python -m venv venv
 venv\Scripts\activate
 
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-## Running in development mode
+### Run
 
 ```bash
 python main.py
 ```
 
 On first launch:
-1. Set the **Onimator path** in the settings bar at the top of the window (e.g. `C:\Users\Admin\Desktop\full_igbot_13.9.0`)
-2. Click **Save** to persist the path
+1. Set the **Onimator path** in the top bar (e.g. `C:\Users\Admin\Desktop\full_igbot_13.9.0`)
+2. Click **Save**
 3. Click **Scan & Sync** to discover accounts
 
-## Configuration
-
-All configuration is stored in OH's internal SQLite database at `%APPDATA%\OH\oh.db`.
-
-| Setting | Description | Default |
-|---|---|---|
-| `bot_root` | Path to the Onimator bot installation directory | *(must be set manually)* |
-| `min_follows` | Minimum follow count for a source to be considered "quality" | 100 |
-| `min_fbr_pct` | Minimum FBR % for a source to be considered "quality" | 10.0 |
-| `delete_threshold` | Weighted FBR % at or below which sources are eligible for bulk delete | 5.0 |
-| `theme` | UI theme (`dark`) | `dark` |
-
-## Logs
-
-Log location: `%APPDATA%\OH\logs\oh.log`
-
-To open the log directory:
-```
-explorer %APPDATA%\OH\logs
-```
-
-Log entries use the format:
-```
-2026-03-27 14:30:00  INFO      oh.ui.main_window — [Sources] Inspection done: username — 25 total ...
-```
-
-Key log prefixes:
-- `[Sources]` — source inspection and FBR computation
-- `[SourceUsage]` — source usage (Used count) reading
-- `[UsedPct]` — Used % derivation and calculation
-
-## Smoke test
-
-After setup:
-
-1. Launch the app: `python main.py`
-2. Set bot root path and click Save
-3. Click **Scan & Sync** — account table should populate
-4. Click **Sources** on any account row — the Sources dialog should show source names, status, and FBR data
-5. Switch to the **Sources** tab — click **Refresh Sources** — the global table should populate
-6. Click any source row — the detail pane should show per-account data including Used and Used %
-7. Check `%APPDATA%\OH\logs\oh.log` — confirm log entries appear
-
-## Packaging to .exe
-
-OH includes a PyInstaller spec file for single-file Windows packaging:
+### Build `.exe`
 
 ```bash
-# Generate placeholder assets (icon + logo) if not already present
 python scripts/generate_placeholder_assets.py
-
-# Build the executable
 python -m PyInstaller OH.spec
-
 # Output: dist/OH.exe
 ```
 
-To create a Desktop shortcut after building:
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/create_shortcut.ps1
+---
+
+## Architecture
+
+```
+┌─────────────┐     ┌──────────────┐     ┌───────────────┐     ┌──────────┐
+│   UI Layer   │────▶│   Services   │────▶│   Modules     │────▶│ Bot Files│
+│  (PySide6)   │     │ (orchestrate)│     │ (read-only*)  │     │ (on disk)│
+└─────────────┘     └──────┬───────┘     └───────────────┘     └──────────┘
+                           │
+                    ┌──────▼───────┐     ┌───────────────┐
+                    │ Repositories │────▶│   oh.db        │
+                    │ (CRUD)       │     │ (SQLite/WAL)   │
+                    └──────────────┘     └───────────────┘
 ```
 
-## Project structure
+\* _Modules are strictly read-only except `SourceDeleter` and `SourceRestorer` which modify `sources.txt` with backup._
+
+| Layer | Location | Responsibility |
+|-------|----------|---------------|
+| **modules/** | `oh/modules/` | Stateless readers of bot files — discovery, FBR, inspection, usage |
+| **repositories/** | `oh/repositories/` | CRUD on OH's internal database — never touches bot files |
+| **services/** | `oh/services/` | Orchestrators combining modules + repositories |
+| **ui/** | `oh/ui/` | PySide6 widgets — calls services, never accesses bot files directly |
+
+---
+
+## Project Structure
 
 ```
 OH/
-├── main.py                          # Entry point — bootstrap, logging, app launch
-├── OH.spec                          # PyInstaller build configuration
-├── requirements.txt                 # Python dependencies
+├── main.py                             # Entry point
+├── OH.spec                             # PyInstaller config
+├── requirements.txt                    # PySide6>=6.6.0
+│
 ├── oh/
-│   ├── resources.py                 # Asset path resolver (dev vs frozen mode)
-│   ├── assets/                      # Bundled icons and logos
 │   ├── db/
-│   │   ├── connection.py            # SQLite connection management
-│   │   └── migrations.py            # Schema migrations
-│   ├── models/                      # Domain dataclasses
-│   │   ├── account.py               # AccountRecord, DiscoveredAccount
-│   │   ├── fbr.py                   # SourceFBRRecord, FBRAnalysisResult
-│   │   ├── fbr_snapshot.py          # FBRSnapshotRecord, BatchFBRResult
-│   │   ├── global_source.py         # GlobalSourceRecord, SourceAccountDetail
-│   │   ├── source.py                # SourceRecord, SourceInspectionResult
-│   │   ├── source_usage.py          # SourceUsageRecord, SourceUsageResult
-│   │   ├── sync.py                  # SyncRun
-│   │   └── delete_history.py        # DeleteHistoryRecord
-│   ├── modules/                     # Read-only business logic (reads bot files)
-│   │   ├── discovery.py             # Account/device discovery from bot root
-│   │   ├── fbr_calculator.py        # FBR computation from data.db
-│   │   ├── source_inspector.py      # Source file reader (sources.txt + data.db)
-│   │   ├── source_usage_reader.py   # Source consumption reader (sources/*.db + .stm)
-│   │   ├── source_deleter.py        # Removes sources from sources.txt
-│   │   └── sync_module.py           # Account config reader
-│   ├── repositories/                # OH database access layer
+│   │   ├── connection.py               # SQLite connection (WAL, FK)
+│   │   └── migrations.py               # Schema migrations (5 versions)
+│   │
+│   ├── models/                         # Pure dataclasses
+│   │   ├── account.py                  # AccountRecord, DiscoveredAccount, DeviceRecord
+│   │   ├── fbr.py                      # SourceFBRRecord, FBRAnalysisResult
+│   │   ├── fbr_snapshot.py             # FBRSnapshotRecord, BatchFBRResult
+│   │   ├── global_source.py            # GlobalSourceRecord, SourceAccountDetail
+│   │   ├── source.py                   # SourceRecord, SourceInspectionResult
+│   │   ├── source_usage.py             # SourceUsageRecord, SourceUsageResult
+│   │   ├── sync.py                     # SyncRun
+│   │   └── delete_history.py           # DeleteAction, DeleteItem
+│   │
+│   ├── modules/                        # Bot file readers
+│   │   ├── discovery.py                # Account & device discovery
+│   │   ├── fbr_calculator.py           # FBR computation from data.db
+│   │   ├── source_inspector.py         # sources.txt + data.db reader
+│   │   ├── source_usage_reader.py      # sources/*.db + .stm reader
+│   │   ├── source_deleter.py           # Remove sources (destructive)
+│   │   ├── source_restorer.py          # Restore sources (revert)
+│   │   └── sync_module.py              # Account config reader
+│   │
+│   ├── repositories/                   # OH database layer
 │   │   ├── account_repo.py
+│   │   ├── device_repo.py
 │   │   ├── settings_repo.py
 │   │   ├── sync_repo.py
 │   │   ├── source_assignment_repo.py
 │   │   ├── fbr_snapshot_repo.py
 │   │   └── delete_history_repo.py
-│   ├── services/                    # High-level orchestrators
-│   │   ├── scan_service.py          # Scan & sync coordination
-│   │   ├── fbr_service.py           # FBR analysis + persistence
-│   │   ├── global_sources_service.py# Source refresh + global reads
-│   │   └── source_delete_service.py # Delete workflow orchestration
-│   └── ui/                          # PySide6 interface
-│       ├── main_window.py           # Main application window
-│       ├── sources_tab.py           # Global Sources tab
-│       ├── settings_tab.py          # Settings tab
-│       ├── source_dialog.py         # Per-account Sources dialog
-│       ├── delete_confirm_dialog.py # Delete confirmation
-│       ├── delete_history_dialog.py # Deletion history viewer
-│       ├── style.py                 # QSS dark stylesheet
-│       └── workers.py               # Background thread helper
-└── scripts/
-    ├── generate_placeholder_assets.py  # Creates oh.ico + logo.png
-    └── create_shortcut.ps1             # Creates Desktop shortcut to dist/OH.exe
+│   │
+│   ├── services/                       # Business logic
+│   │   ├── scan_service.py             # Scan & sync coordination
+│   │   ├── fbr_service.py              # FBR analysis + snapshots
+│   │   ├── global_sources_service.py   # Cross-account aggregation
+│   │   └── source_delete_service.py    # Delete & revert orchestration
+│   │
+│   └── ui/                             # Desktop interface
+│       ├── main_window.py              # Main window + Accounts tab
+│       ├── sources_tab.py              # Global Sources tab
+│       ├── settings_tab.py             # Settings tab
+│       ├── source_dialog.py            # Per-account Sources dialog
+│       ├── delete_confirm_dialog.py    # Delete confirmation
+│       ├── delete_history_dialog.py    # History viewer + revert
+│       ├── style.py                    # Dark theme QSS
+│       └── workers.py                  # QThread helpers
+│
+├── scripts/
+│   ├── generate_placeholder_assets.py  # Create oh.ico + logo.png
+│   └── create_shortcut.ps1             # Desktop shortcut
+│
+└── docs/
+    └── FEATURES.md                     # Operator-facing feature guide
 ```
 
-## Architecture notes
+---
 
-OH is strictly **read-only with respect to bot state**, except for one intentional operation: deleting sources from `sources.txt` files. It never modifies `data.db`, source databases, `.stm` files, or any other bot runtime data.
+## Configuration
 
-The application uses a layered architecture:
+All settings stored in `%APPDATA%\OH\oh.db`:
 
-- **modules/** — pure functions and classes that read bot files from disk. No database writes. No UI dependencies.
-- **repositories/** — CRUD operations on OH's own SQLite database. No disk I/O to bot files.
-- **services/** — orchestrate modules and repositories. Called by the UI layer.
-- **ui/** — PySide6 widgets. Calls services, never touches bot files directly.
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `bot_root` | Onimator installation directory | _(must be set)_ |
+| `min_follows` | Min follow count for "quality" source | `100` |
+| `min_fbr_pct` | Min FBR % for "quality" source | `10.0` |
+| `delete_threshold` | Weighted FBR % for bulk delete eligibility | `5.0` |
+| `theme` | UI theme | `dark` |
 
-OH's internal database (`%APPDATA%\OH\oh.db`) stores account registry, sync history, source assignments, FBR snapshots, settings, and deletion history. It is created automatically on first launch and migrated on subsequent launches if the schema has changed.
+---
 
-## Safety notes
+## Logs
 
-- **Source deletion is destructive** — it modifies `sources.txt` files inside the bot directory. Always review the confirmation dialog before proceeding.
-- **Bulk delete** removes all sources at or below the configured FBR threshold across all active accounts. Use with caution.
-- **OH does not run the bot** — it is a monitoring and management tool only.
-- All deletions are logged in the deletion history (viewable from the Sources tab).
+Location: `%APPDATA%\OH\logs\oh.log`
+
+- Rotating: 2 MB per file, 5 backups (10 MB max)
+- DEBUG to file, INFO to console
+- Prefixes: `[Sources]`, `[SourceUsage]`, `[UsedPct]`, `[Delete]`, `[Revert]`
+
+---
+
+## Safety
+
+- **Read-only** — OH never modifies `data.db`, source databases, `.stm` files, or any bot runtime data
+- **Backup** — `sources.txt.bak` created before every delete/restore operation
+- **Confirmation** — detailed dialog before any destructive action
+- **Audit trail** — all deletions logged with timestamps, machine name, affected accounts
+- **Revert** — completed deletions can be reversed from the history dialog
+
+---
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Language | Python 3.9+ |
+| GUI | PySide6 6.6+ (Qt 6) |
+| Database | SQLite 3 (WAL mode) |
+| Packaging | PyInstaller |
+| Platform | Windows 10/11 |
+| Dependencies | PySide6 only — everything else is stdlib |
+
+---
 
 ## License
 

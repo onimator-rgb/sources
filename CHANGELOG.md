@@ -2,6 +2,25 @@
 
 All notable changes to OH are documented here.
 
+## 2026-03-30
+
+### Added
+- **Source revert/restore** — revert completed delete actions from the History dialog, restoring sources back to `sources.txt`
+- `SourceRestorer` module — inverse of `SourceDeleter`, appends source lines back to `sources.txt` with backup
+- **Per-account source deletion** — delete a source from a single account (not all accounts globally)
+- Delete confirmation dialog for per-account operations with account details
+- **Delete history enhancements:**
+  - Status column (Completed / Reverted) with color coding
+  - Revert button with eligibility checking and descriptive tooltips
+  - Type column now shows scope (Account / Global) and revert targets
+- Database migration 005 — `status`, `reverted_at`, `revert_of_action_id` on delete actions; `affected_details_json` on delete items
+- `mark_source_active()` in source assignment repo (inverse of mark_inactive)
+- Structured logging with `[Delete]` and `[Revert]` prefixes
+
+### Changed
+- Delete service now captures full affected account details (account_id, device_id, username, device_name) for all delete operations to enable future reverts
+- History dialog refreshes source data on close when a revert was performed
+
 ## 2026-03-27
 
 ### Added
