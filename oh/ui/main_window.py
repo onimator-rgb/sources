@@ -561,6 +561,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _refresh_table(self) -> None:
+        # Remember selection
+        selected_id = self._get_selected_account_id()
+
         self._all_accounts = self._accounts.get_all()
         self._fbr_map = self._fbr_service.get_latest_map()
         self._source_count_map = self._global_sources_service.get_active_source_counts()
@@ -585,6 +588,33 @@ class MainWindow(QMainWindow):
         self._update_device_filter()
         self._apply_filter()
         self._update_last_sync_label()
+
+        # Restore selection
+        if selected_id is not None:
+            self._select_account_by_id(selected_id)
+
+    def _get_selected_account_id(self) -> int:
+        """Return the account_id of the currently selected row, or None."""
+        selected = self._table.selectionModel().selectedRows()
+        if not selected:
+            return None
+        item = self._table.item(selected[0].row(), COL_USERNAME)
+        if item:
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if data and data[0] == "account":
+                return data[1]
+        return None
+
+    def _select_account_by_id(self, account_id: int) -> None:
+        """Find and select the row for the given account_id."""
+        for row in range(self._table.rowCount()):
+            item = self._table.item(row, COL_USERNAME)
+            if item:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if data and data[0] == "account" and data[1] == account_id:
+                    self._table.selectRow(row)
+                    self._table.scrollToItem(item)
+                    return
 
     def _refresh_source_counts(self) -> None:
         """Called by SourcesTab (via parent-chain walk) after a delete operation."""
@@ -1538,15 +1568,9 @@ class MainWindow(QMainWindow):
 
     def _focus_account(self, account_id: int) -> None:
         """Navigate to an account row in the Accounts tab."""
-        self._tabs.setCurrentIndex(0)  # Switch to Accounts tab
-        for row in range(self._table.rowCount()):
-            item = self._table.item(row, COL_USERNAME)
-            if item:
-                data = item.data(Qt.ItemDataRole.UserRole)
-                if data and data[0] == "account" and data[1] == account_id:
-                    self._table.selectRow(row)
-                    self._table.scrollToItem(item)
-                    return
+        self._tabs.setCurrentIndex(0)
+        self._select_account_by_id(account_id)
+        self._table.setFocus()
 
     def _focus_source(self, source_name: str) -> None:
         """Navigate to the Sources tab and filter by source name."""

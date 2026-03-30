@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QMessageBox, QComboBox,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 
 from oh.models.recommendation import (
     Recommendation,
@@ -79,6 +79,9 @@ class RecommendationsDialog(QDialog):
 
         self._build_ui()
         self._populate()
+
+        QShortcut(QKeySequence("Ctrl+R"), self, self._on_refresh_clicked)
+        QShortcut(QKeySequence("Escape"), self, self.accept)
 
     # ------------------------------------------------------------------
     # UI

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QFrame,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 
 from oh.models.recommendation import (
     Recommendation,
@@ -155,6 +155,10 @@ class CockpitDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         btn_lo.addWidget(close_btn)
         outer.addLayout(btn_lo)
+
+        # Keyboard shortcuts
+        QShortcut(QKeySequence("Ctrl+R"), self, self._do_refresh)
+        QShortcut(QKeySequence("Escape"), self, self.accept)
 
         self._populate()
 
