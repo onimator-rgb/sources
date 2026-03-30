@@ -248,6 +248,85 @@ ALTER TABLE source_delete_items ADD COLUMN affected_details_json TEXT
 """
 
 # ---------------------------------------------------------------------------
+# Migration 006 — session snapshots, account tags, review flag
+# ---------------------------------------------------------------------------
+
+_MIGRATION_006_SQL = """
+CREATE TABLE IF NOT EXISTS session_snapshots (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id     INTEGER NOT NULL REFERENCES oh_accounts(id),
+    device_id      TEXT    NOT NULL,
+    username       TEXT    NOT NULL,
+    snapshot_date  TEXT    NOT NULL,
+    slot           TEXT    NOT NULL,
+    follow_count   INTEGER NOT NULL DEFAULT 0,
+    like_count     INTEGER NOT NULL DEFAULT 0,
+    dm_count       INTEGER NOT NULL DEFAULT 0,
+    unfollow_count INTEGER NOT NULL DEFAULT 0,
+    follow_limit   INTEGER,
+    like_limit     INTEGER,
+    has_activity   INTEGER NOT NULL DEFAULT 0,
+    collected_at   TEXT    NOT NULL,
+    UNIQUE (account_id, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_snap_account
+    ON session_snapshots (account_id, snapshot_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_session_snap_date
+    ON session_snapshots (snapshot_date, has_activity);
+
+CREATE TABLE IF NOT EXISTS account_tags (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER NOT NULL REFERENCES oh_accounts(id),
+    tag_source   TEXT    NOT NULL,
+    tag_category TEXT    NOT NULL,
+    tag_value    TEXT    NOT NULL,
+    tag_level    INTEGER,
+    updated_at   TEXT    NOT NULL,
+    UNIQUE (account_id, tag_source, tag_value)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_tags_account
+    ON account_tags (account_id);
+
+CREATE INDEX IF NOT EXISTS idx_account_tags_category
+    ON account_tags (tag_category, tag_value);
+
+ALTER TABLE oh_accounts ADD COLUMN review_flag INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE oh_accounts ADD COLUMN review_note TEXT;
+ALTER TABLE oh_accounts ADD COLUMN review_set_at TEXT;
+ALTER TABLE oh_accounts ADD COLUMN bot_tags_raw TEXT;
+ALTER TABLE oh_accounts ADD COLUMN like_limit_perday TEXT;
+ALTER TABLE oh_accounts ADD COLUMN follow_limit_perday TEXT
+"""
+
+# ---------------------------------------------------------------------------
+# Migration 007 — operator action audit trail
+# ---------------------------------------------------------------------------
+
+_MIGRATION_007_SQL = """
+CREATE TABLE IF NOT EXISTS operator_actions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER NOT NULL REFERENCES oh_accounts(id),
+    username     TEXT    NOT NULL,
+    device_id    TEXT    NOT NULL,
+    action_type  TEXT    NOT NULL,
+    old_value    TEXT,
+    new_value    TEXT,
+    note         TEXT,
+    performed_at TEXT    NOT NULL,
+    machine      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_op_actions_account
+    ON operator_actions (account_id);
+
+CREATE INDEX IF NOT EXISTS idx_op_actions_type
+    ON operator_actions (action_type, performed_at DESC)
+"""
+
+# ---------------------------------------------------------------------------
 # Registry — append new entries here, never modify existing ones
 # ---------------------------------------------------------------------------
 
@@ -257,6 +336,8 @@ _MIGRATIONS: List[Tuple[int, str, str]] = [
     (3, "source_assignments",   _MIGRATION_003_SQL),
     (4, "delete_history",       _MIGRATION_004_SQL),
     (5, "delete_revert_support", _MIGRATION_005_SQL),
+    (6, "session_and_tags",     _MIGRATION_006_SQL),
+    (7, "operator_actions",     _MIGRATION_007_SQL),
 ]
 
 

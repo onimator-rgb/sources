@@ -4,11 +4,16 @@ Soft-delete: removed accounts keep their row with removed_at set.
 """
 import sqlite3
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from oh.models.account import AccountRecord
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class AccountRepository:
@@ -118,6 +123,9 @@ class AccountRepository:
                 follow_enabled=?, unfollow_enabled=?,
                 limit_per_day=?,
                 data_db_exists=?, sources_txt_exists=?,
+                bot_tags_raw=?,
+                follow_limit_perday=?,
+                like_limit_perday=?,
                 removed_at=NULL,
                 removal_sync_run_id=NULL
             WHERE id=?
@@ -130,6 +138,9 @@ class AccountRepository:
                 account.limit_per_day,
                 1 if account.data_db_exists else 0,
                 1 if account.sources_txt_exists else 0,
+                account.bot_tags_raw,
+                account.follow_limit_perday,
+                account.like_limit_perday,
                 account_id,
             ),
         )
@@ -145,6 +156,78 @@ class AccountRepository:
             (removed_at, sync_run_id, account_id),
         )
         self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Writes — review flag
+    # ------------------------------------------------------------------
+
+    def set_review_flag(
+        self, account_id: int, note: Optional[str] = None
+    ) -> None:
+        """Mark an account for operator review."""
+        self._conn.execute(
+            """
+            UPDATE oh_accounts
+            SET review_flag = 1, review_note = ?, review_set_at = ?
+            WHERE id = ?
+            """,
+            (note, _utcnow(), account_id),
+        )
+        self._conn.commit()
+
+    def clear_review_flag(self, account_id: int) -> None:
+        """Remove the review flag from an account."""
+        self._conn.execute(
+            """
+            UPDATE oh_accounts
+            SET review_flag = 0, review_note = NULL, review_set_at = NULL
+            WHERE id = ?
+            """,
+            (account_id,),
+        )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Writes — bot metadata (tags + limits from settings.db)
+    # ------------------------------------------------------------------
+
+    def update_bot_metadata(
+        self,
+        account_id: int,
+        bot_tags_raw: Optional[str],
+        follow_limit_perday: Optional[str],
+        like_limit_perday: Optional[str],
+    ) -> None:
+        """
+        Update tag and limit fields read from the bot's settings.db.
+        Does not touch any other account fields.
+        """
+        self._conn.execute(
+            """
+            UPDATE oh_accounts
+            SET bot_tags_raw = ?, follow_limit_perday = ?, like_limit_perday = ?
+            WHERE id = ?
+            """,
+            (bot_tags_raw, follow_limit_perday, like_limit_perday, account_id),
+        )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Queries — review
+    # ------------------------------------------------------------------
+
+    def get_flagged_for_review(self) -> list[AccountRecord]:
+        """Return all active accounts with review_flag = 1."""
+        rows = self._conn.execute(
+            """
+            SELECT a.*, d.device_name
+            FROM oh_accounts a
+            LEFT JOIN oh_devices d ON d.device_id = a.device_id
+            WHERE a.removed_at IS NULL AND a.review_flag = 1
+            ORDER BY a.review_set_at DESC, a.username
+            """
+        ).fetchall()
+        return [self._from_row(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Internals
@@ -176,4 +259,11 @@ class AccountRepository:
             last_metadata_updated_at=row["last_metadata_updated_at"],
             data_db_exists=bool(row["data_db_exists"]),
             sources_txt_exists=bool(row["sources_txt_exists"]),
+            # --- Stage 1 fields (migration 006) ---
+            review_flag=bool(row["review_flag"]) if "review_flag" in keys else False,
+            review_note=row["review_note"] if "review_note" in keys else None,
+            review_set_at=row["review_set_at"] if "review_set_at" in keys else None,
+            bot_tags_raw=row["bot_tags_raw"] if "bot_tags_raw" in keys else None,
+            like_limit_perday=row["like_limit_perday"] if "like_limit_perday" in keys else None,
+            follow_limit_perday=row["follow_limit_perday"] if "follow_limit_perday" in keys else None,
         )

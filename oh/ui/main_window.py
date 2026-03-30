@@ -27,13 +27,16 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLineEdit, QLabel, QFileDialog, QStatusBar,
     QCheckBox, QComboBox, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QFrame, QMessageBox,
+    QAbstractItemView, QFrame, QMessageBox, QMenu, QInputDialog,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPixmap
 
+from datetime import date
+
 from oh.models.account import AccountRecord, DiscoveredAccount
 from oh.models.fbr_snapshot import FBRSnapshotRecord, BatchFBRResult, SNAPSHOT_OK, SNAPSHOT_ERROR
+from oh.models.session import AccountSessionRecord, slot_for_times
 from oh.models.sync import SyncRun
 from oh.modules.discovery import DiscoveryError
 from oh.modules.fbr_calculator import FBRCalculator
@@ -45,6 +48,9 @@ from oh.repositories.sync_repo import SyncRepository
 from oh.services.fbr_service import FBRService
 from oh.services.global_sources_service import GlobalSourcesService
 from oh.services.scan_service import ScanService
+from oh.services.session_service import SessionService
+from oh.services.operator_action_service import OperatorActionService
+from oh.services.recommendation_service import RecommendationService
 from oh.services.source_delete_service import SourceDeleteService
 from oh.resources import asset_path, asset_exists
 from oh.ui.settings_tab import SettingsTab
@@ -61,22 +67,29 @@ logger = logging.getLogger(__name__)
 COL_USERNAME    = 0
 COL_DEVICE      = 1
 COL_STATUS      = 2
-COL_FOLLOW      = 3
-COL_UNFOLLOW    = 4
-COL_LIMIT       = 5
-COL_DATA_DB     = 6
-COL_SOURCES_TXT = 7
-COL_DISCOVERED  = 8
-COL_LAST_SEEN   = 9
-COL_SRC_COUNT   = 10   # active source count — from source_assignments
-COL_FBR_QUALITY = 11   # "3/12" quality/total — from latest snapshot
-COL_FBR_BEST    = 12   # best FBR % — from latest snapshot
-COL_FBR_DATE    = 13   # date of last FBR analysis
-COL_ACTIONS     = 14
+COL_TAGS        = 3
+COL_FOLLOW      = 4
+COL_UNFOLLOW    = 5
+COL_LIMIT       = 6
+COL_FOLLOW_TODAY = 7
+COL_LIKE_TODAY   = 8
+COL_FOLLOW_LIM   = 9
+COL_LIKE_LIM     = 10
+COL_REVIEW       = 11
+COL_DATA_DB     = 12
+COL_SOURCES_TXT = 13
+COL_DISCOVERED  = 14
+COL_LAST_SEEN   = 15
+COL_SRC_COUNT   = 16   # active source count — from source_assignments
+COL_FBR_QUALITY = 17   # "3/12" quality/total — from latest snapshot
+COL_FBR_BEST    = 18   # best FBR % — from latest snapshot
+COL_FBR_DATE    = 19   # date of last FBR analysis
+COL_ACTIONS     = 20
 
 COLUMN_HEADERS = [
-    "Username", "Device", "Status",
+    "Username", "Device", "Status", "Tags",
     "Follow", "Unfollow", "Limit/Day",
+    "Follow Today", "Like Today", "F. Limit", "L. Limit", "Review",
     "Data DB", "Sources.txt",
     "Discovered", "Last Seen",
     "Active Sources",
@@ -135,6 +148,18 @@ _STATUS_FILTER_ACTIVE   = "Active only"
 _STATUS_FILTER_REMOVED  = "Removed only"
 _STATUS_FILTER_ALL      = "All accounts"
 
+_TAGS_FILTER_ALL     = "All tags"
+_TAGS_FILTER_TB      = "TB"
+_TAGS_FILTER_LIMITS  = "limits"
+_TAGS_FILTER_SLAVE   = "SLAVE"
+_TAGS_FILTER_START   = "START"
+_TAGS_FILTER_PK      = "PK"
+_TAGS_FILTER_CUSTOM  = "Custom"
+
+_ACTIVITY_FILTER_ALL      = "All activity"
+_ACTIVITY_FILTER_ZERO     = "0 actions today"
+_ACTIVITY_FILTER_HAS      = "Has actions"
+
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -144,21 +169,35 @@ class MainWindow(QMainWindow):
         fbr_service: FBRService,
         global_sources_service: GlobalSourcesService,
         source_delete_service: SourceDeleteService,
+        session_service: Optional[SessionService] = None,
+        operator_action_service: Optional[OperatorActionService] = None,
+        operator_action_repo=None,
+        tag_repo=None,
+        recommendation_service: Optional[RecommendationService] = None,
     ) -> None:
         super().__init__()
         self._scan_service            = scan_service
         self._fbr_service             = fbr_service
         self._global_sources_service  = global_sources_service
         self._source_delete_service   = source_delete_service
+        self._session_service         = session_service
+        self._operator_action_service = operator_action_service
+        self._operator_action_repo    = operator_action_repo
+        self._tag_repo                = tag_repo
+        self._recommendation_service  = recommendation_service
         self._settings                = SettingsRepository(conn)
         self._accounts                = AccountRepository(conn)
         self._sync_repo               = SyncRepository(conn)
 
+        self._conn                    = conn
         self._worker: Optional[WorkerThread] = None
         self._all_accounts: list = []
         self._last_discovery: list = []
         self._fbr_map: dict[int, FBRSnapshotRecord] = {}
         self._source_count_map: dict[int, int] = {}
+        self._session_map: dict[int, AccountSessionRecord] = {}
+        self._device_status_map: dict[str, str] = {}  # device_id → last_known_status
+        self._op_tags_map: dict[int, str] = {}  # account_id → "TB3 | limits 2"
 
         self.setWindowTitle("OH — Operational Hub")
         self.setMinimumSize(1400, 720)
@@ -305,6 +344,11 @@ class MainWindow(QMainWindow):
         refresh_btn.setToolTip("Reload the account list from the OH database (no scan)")
         refresh_btn.clicked.connect(self._refresh_table)
 
+        self._report_btn = QPushButton("Session Report")
+        self._report_btn.setFixedHeight(32)
+        self._report_btn.setToolTip("Open session report for today")
+        self._report_btn.clicked.connect(self._on_session_report)
+
         self._busy_label = QLabel("")
         self._busy_label.setStyleSheet("font-style: italic; color: #aaa;")
 
@@ -314,9 +358,28 @@ class MainWindow(QMainWindow):
         )
         self._last_sync_label.setStyleSheet("color: #777; font-size: 11px;")
 
+        self._cockpit_btn = QPushButton("Cockpit")
+        self._cockpit_btn.setFixedHeight(32)
+        self._cockpit_btn.setToolTip("Daily operations overview")
+        self._cockpit_btn.clicked.connect(self._on_cockpit)
+
+        self._history_btn = QPushButton("Action History")
+        self._history_btn.setFixedHeight(32)
+        self._history_btn.setToolTip("Show recent operator actions")
+        self._history_btn.clicked.connect(self._on_action_history)
+
+        self._recs_btn = QPushButton("Recommendations")
+        self._recs_btn.setFixedHeight(32)
+        self._recs_btn.setToolTip("Generate and view operational recommendations")
+        self._recs_btn.clicked.connect(self._on_recommendations)
+
+        lo.addWidget(self._cockpit_btn)
         lo.addWidget(self._scan_btn)
         lo.addWidget(self._fbr_btn)
         lo.addWidget(refresh_btn)
+        lo.addWidget(self._report_btn)
+        lo.addWidget(self._recs_btn)
+        lo.addWidget(self._history_btn)
         lo.addSpacing(12)
         lo.addWidget(self._busy_label, stretch=1)
         lo.addWidget(self._last_sync_label)
@@ -381,6 +444,40 @@ class MainWindow(QMainWindow):
 
         lo.addSpacing(4)
 
+        lo.addSpacing(4)
+
+        # Tags filter
+        lo.addWidget(QLabel("Tags:"))
+        self._tags_filter = QComboBox()
+        self._tags_filter.addItems([
+            _TAGS_FILTER_ALL, _TAGS_FILTER_TB, _TAGS_FILTER_LIMITS,
+            _TAGS_FILTER_SLAVE, _TAGS_FILTER_START, _TAGS_FILTER_PK,
+            _TAGS_FILTER_CUSTOM,
+        ])
+        self._tags_filter.setFixedWidth(90)
+        self._tags_filter.currentIndexChanged.connect(self._apply_filter)
+        lo.addWidget(self._tags_filter)
+
+        lo.addSpacing(4)
+
+        # Activity filter
+        lo.addWidget(QLabel("Activity:"))
+        self._activity_filter = QComboBox()
+        self._activity_filter.addItems([
+            _ACTIVITY_FILTER_ALL, _ACTIVITY_FILTER_ZERO, _ACTIVITY_FILTER_HAS,
+        ])
+        self._activity_filter.setFixedWidth(120)
+        self._activity_filter.currentIndexChanged.connect(self._apply_filter)
+        lo.addWidget(self._activity_filter)
+
+        lo.addSpacing(4)
+
+        # Review only checkbox
+        self._review_cb = QCheckBox("Review only")
+        self._review_cb.setToolTip("Show only accounts flagged for review")
+        self._review_cb.stateChanged.connect(self._apply_filter)
+        lo.addWidget(self._review_cb)
+
         # Orphans checkbox
         self._show_orphans_cb = QCheckBox("Show orphans")
         self._show_orphans_cb.setToolTip(
@@ -414,29 +511,37 @@ class MainWindow(QMainWindow):
         t.setWordWrap(False)
 
         hdr = t.horizontalHeader()
-        for col in (COL_USERNAME, COL_DEVICE, COL_DISCOVERED, COL_LAST_SEEN):
+        for col in (COL_USERNAME, COL_DEVICE, COL_TAGS, COL_DISCOVERED, COL_LAST_SEEN):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
         for col in (COL_STATUS, COL_FOLLOW, COL_UNFOLLOW, COL_LIMIT,
+                    COL_FOLLOW_TODAY, COL_LIKE_TODAY, COL_FOLLOW_LIM, COL_LIKE_LIM,
+                    COL_REVIEW,
                     COL_DATA_DB, COL_SOURCES_TXT, COL_SRC_COUNT,
                     COL_FBR_QUALITY, COL_FBR_BEST, COL_FBR_DATE,
                     COL_ACTIONS):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
 
-        t.setColumnWidth(COL_USERNAME,     180)
-        t.setColumnWidth(COL_DEVICE,       100)
-        t.setColumnWidth(COL_STATUS,        80)
-        t.setColumnWidth(COL_FOLLOW,        62)
-        t.setColumnWidth(COL_UNFOLLOW,      72)
-        t.setColumnWidth(COL_LIMIT,         76)
-        t.setColumnWidth(COL_DATA_DB,       68)
-        t.setColumnWidth(COL_SOURCES_TXT,   88)
-        t.setColumnWidth(COL_DISCOVERED,   105)
-        t.setColumnWidth(COL_LAST_SEEN,    105)
-        t.setColumnWidth(COL_SRC_COUNT,     80)
-        t.setColumnWidth(COL_FBR_QUALITY,   95)
-        t.setColumnWidth(COL_FBR_BEST,      80)
-        t.setColumnWidth(COL_FBR_DATE,      90)
-        t.setColumnWidth(COL_ACTIONS,      210)
+        t.setColumnWidth(COL_USERNAME,     160)
+        t.setColumnWidth(COL_DEVICE,       110)
+        t.setColumnWidth(COL_STATUS,        68)
+        t.setColumnWidth(COL_TAGS,         100)
+        t.setColumnWidth(COL_FOLLOW,        52)
+        t.setColumnWidth(COL_UNFOLLOW,      62)
+        t.setColumnWidth(COL_LIMIT,         62)
+        t.setColumnWidth(COL_FOLLOW_TODAY,  78)
+        t.setColumnWidth(COL_LIKE_TODAY,    70)
+        t.setColumnWidth(COL_FOLLOW_LIM,    56)
+        t.setColumnWidth(COL_LIKE_LIM,      52)
+        t.setColumnWidth(COL_REVIEW,        55)
+        t.setColumnWidth(COL_DATA_DB,       56)
+        t.setColumnWidth(COL_SOURCES_TXT,   76)
+        t.setColumnWidth(COL_DISCOVERED,    90)
+        t.setColumnWidth(COL_LAST_SEEN,     90)
+        t.setColumnWidth(COL_SRC_COUNT,     70)
+        t.setColumnWidth(COL_FBR_QUALITY,   82)
+        t.setColumnWidth(COL_FBR_BEST,      70)
+        t.setColumnWidth(COL_FBR_DATE,      80)
+        t.setColumnWidth(COL_ACTIONS,      180)
 
         t.doubleClicked.connect(self._on_row_double_clicked)
         self._table = t
@@ -450,6 +555,24 @@ class MainWindow(QMainWindow):
         self._all_accounts = self._accounts.get_all()
         self._fbr_map = self._fbr_service.get_latest_map()
         self._source_count_map = self._global_sources_service.get_active_source_counts()
+        if self._session_service:
+            self._session_map = self._session_service.get_session_map(
+                date.today().isoformat()
+            )
+        # Load operator tags map
+        if self._tag_repo:
+            try:
+                self._op_tags_map = self._tag_repo.get_operator_tags_map()
+            except Exception:
+                self._op_tags_map = {}
+        # Build device status map for color dots
+        try:
+            rows = self._conn.execute(
+                "SELECT device_id, last_known_status FROM oh_devices"
+            ).fetchall()
+            self._device_status_map = {r[0]: r[1] for r in rows}
+        except Exception:
+            self._device_status_map = {}
         self._update_device_filter()
         self._apply_filter()
         self._update_last_sync_label()
@@ -481,23 +604,24 @@ class MainWindow(QMainWindow):
 
     def _clear_filters(self) -> None:
         """Reset all filters to their defaults without triggering multiple repaints."""
-        self._status_filter.blockSignals(True)
-        self._fbr_filter.blockSignals(True)
-        self._device_filter.blockSignals(True)
-        self._search_box.blockSignals(True)
-        self._show_orphans_cb.blockSignals(True)
+        for w in (self._status_filter, self._fbr_filter, self._device_filter,
+                  self._search_box, self._show_orphans_cb,
+                  self._tags_filter, self._activity_filter, self._review_cb):
+            w.blockSignals(True)
 
-        self._status_filter.setCurrentIndex(0)   # Active only
-        self._fbr_filter.setCurrentIndex(0)       # All FBR states
-        self._device_filter.setCurrentIndex(0)    # All devices
+        self._status_filter.setCurrentIndex(0)
+        self._fbr_filter.setCurrentIndex(0)
+        self._device_filter.setCurrentIndex(0)
+        self._tags_filter.setCurrentIndex(0)
+        self._activity_filter.setCurrentIndex(0)
         self._search_box.clear()
         self._show_orphans_cb.setChecked(False)
+        self._review_cb.setChecked(False)
 
-        self._status_filter.blockSignals(False)
-        self._fbr_filter.blockSignals(False)
-        self._device_filter.blockSignals(False)
-        self._search_box.blockSignals(False)
-        self._show_orphans_cb.blockSignals(False)
+        for w in (self._status_filter, self._fbr_filter, self._device_filter,
+                  self._search_box, self._show_orphans_cb,
+                  self._tags_filter, self._activity_filter, self._review_cb):
+            w.blockSignals(False)
 
         self._apply_filter()
 
@@ -520,11 +644,14 @@ class MainWindow(QMainWindow):
         return True
 
     def _apply_filter(self) -> None:
-        status_filt  = self._status_filter.currentText()
-        fbr_filt     = self._fbr_filter.currentText()
-        device_filt  = self._device_filter.currentText()
-        query        = self._search_box.text().strip().lower()
-        show_orphans = self._show_orphans_cb.isChecked()
+        status_filt   = self._status_filter.currentText()
+        fbr_filt      = self._fbr_filter.currentText()
+        device_filt   = self._device_filter.currentText()
+        tags_filt     = self._tags_filter.currentText()
+        activity_filt = self._activity_filter.currentText()
+        review_only   = self._review_cb.isChecked()
+        query         = self._search_box.text().strip().lower()
+        show_orphans  = self._show_orphans_cb.isChecked()
 
         active_accounts = [a for a in self._all_accounts if a.is_active]
         total_active    = len(active_accounts)
@@ -549,11 +676,45 @@ class MainWindow(QMainWindow):
             if not self._fbr_filter_matches(fbr_filt, snap):
                 continue
 
+            # --- tags dimension ---
+            if tags_filt != _TAGS_FILTER_ALL:
+                raw = (acc.bot_tags_raw or "").upper()
+                if tags_filt == _TAGS_FILTER_TB and "TB" not in raw:
+                    continue
+                elif tags_filt == _TAGS_FILTER_LIMITS and "[" not in raw:
+                    continue
+                elif tags_filt == _TAGS_FILTER_SLAVE and "SLAVE" not in raw:
+                    continue
+                elif tags_filt == _TAGS_FILTER_START and "START" not in raw:
+                    continue
+                elif tags_filt == _TAGS_FILTER_PK and " PK" not in raw and raw != "PK":
+                    continue
+                elif tags_filt == _TAGS_FILTER_CUSTOM:
+                    # custom = has tags but none of the known keywords
+                    known = {"SLAVE", "AI", "START", "PK"}
+                    tokens = raw.split("]")[-1].split() if "]" in raw else raw.split()
+                    if not any(t for t in tokens if t not in known and not t.startswith("TB")):
+                        continue
+
+            # --- review dimension ---
+            if review_only and not acc.review_flag:
+                continue
+
+            # --- activity dimension ---
+            if activity_filt != _ACTIVITY_FILTER_ALL and acc.id is not None:
+                sess = self._session_map.get(acc.id)
+                has_act = sess.has_activity if sess else False
+                if activity_filt == _ACTIVITY_FILTER_ZERO and has_act:
+                    continue
+                if activity_filt == _ACTIVITY_FILTER_HAS and not has_act:
+                    continue
+
             # --- text search ---
             if query:
                 name_match   = query in acc.username.lower()
                 device_match = bool(acc.device_name and query in acc.device_name.lower())
-                if not name_match and not device_match:
+                tags_match   = bool(acc.bot_tags_raw and query in acc.bot_tags_raw.lower())
+                if not name_match and not device_match and not tags_match:
                     continue
 
             rows.append(("account", acc))
@@ -611,11 +772,84 @@ class MainWindow(QMainWindow):
         seen_date = acc.last_seen_at[:10]  if acc.last_seen_at  else "—"
 
         self._table.setItem(row, COL_USERNAME,    self._make_item(acc.username, dimmed=removed))
-        self._table.setItem(row, COL_DEVICE,      self._make_item(acc.device_name or acc.device_id, dimmed=removed))
+
+        # Device column with status color dot prefix
+        device_name = acc.device_name or acc.device_id
+        dev_status = self._device_status_map.get(acc.device_id)
+        if dev_status == "running":
+            dot = "\u25cf "  # filled circle
+            dot_color = C_YES    # green
+        elif dev_status == "stop":
+            dot = "\u25cf "
+            dot_color = C_REMOVED  # gray
+        else:
+            dot = "\u25cf "
+            dot_color = C_NO     # red — unknown/offline
+        device_item = self._make_item(dot + device_name, dimmed=removed)
+        if not removed:
+            device_item.setForeground(dot_color)
+        self._table.setItem(row, COL_DEVICE, device_item)
+
         self._table.setItem(row, COL_STATUS,      self._make_item(status_text, center, status_color))
+
+        # Tags — combine bot tags + operator tags
+        parts = []
+        if acc.bot_tags_raw:
+            parts.append(acc.bot_tags_raw)
+        op_tags = self._op_tags_map.get(acc.id) if acc.id else None
+        if op_tags:
+            parts.append("OP:" + op_tags.replace(" | ", " OP:"))
+        tags_text = " | ".join(parts) if parts else "\u2014"
+        tags_color = C_WARN if op_tags else None  # amber highlight if operator tags exist
+        self._table.setItem(row, COL_TAGS, self._make_item(
+            tags_text, color=tags_color, dimmed=removed))
+
         self._table.setItem(row, COL_FOLLOW,      self._make_bool_item(acc.follow_enabled, dimmed=removed))
         self._table.setItem(row, COL_UNFOLLOW,    self._make_bool_item(acc.unfollow_enabled, dimmed=removed))
         self._table.setItem(row, COL_LIMIT,       self._make_item(acc.limit_per_day or "—", center, dimmed=removed))
+
+        # Session data columns
+        sess = self._session_map.get(acc.id) if acc.id is not None else None
+        follow_today = sess.follow_count if sess else 0
+        like_today = sess.like_count if sess else 0
+
+        # Follow Today — red if 0 in active slot with follow enabled
+        ft_color = None
+        if not removed and acc.follow_enabled and follow_today == 0 and sess is not None:
+            ft_color = C_NO
+        elif follow_today > 0:
+            ft_color = C_YES
+        ft_item = _SortableItem(str(follow_today) if sess else "—", follow_today if sess else -1)
+        ft_item.setTextAlignment(center)
+        if removed:
+            ft_item.setForeground(C_REMOVED)
+        elif ft_color:
+            ft_item.setForeground(ft_color)
+        self._table.setItem(row, COL_FOLLOW_TODAY, ft_item)
+
+        # Like Today — neutral rendering (no red for 0 — we can't distinguish
+        # accounts without like flow enabled from those that failed)
+        lt_color = C_YES if like_today > 0 else None
+        lt_item = _SortableItem(str(like_today) if sess else "—", like_today if sess else -1)
+        lt_item.setTextAlignment(center)
+        if removed:
+            lt_item.setForeground(C_REMOVED)
+        elif lt_color:
+            lt_item.setForeground(lt_color)
+        self._table.setItem(row, COL_LIKE_TODAY, lt_item)
+
+        # Follow Limit / Like Limit
+        self._table.setItem(row, COL_FOLLOW_LIM, self._make_item(
+            acc.follow_limit_perday or "—", center, dimmed=removed))
+        self._table.setItem(row, COL_LIKE_LIM, self._make_item(
+            acc.like_limit_perday or "—", center, dimmed=removed))
+
+        # Review flag
+        review_text = "!" if acc.review_flag else ""
+        review_color = C_WARN if acc.review_flag else None
+        self._table.setItem(row, COL_REVIEW, self._make_item(
+            review_text, center, review_color, dimmed=removed))
+
         self._table.setItem(row, COL_DATA_DB,     self._make_bool_item(acc.data_db_exists, dimmed=removed))
         self._table.setItem(row, COL_SOURCES_TXT, self._make_bool_item(acc.sources_txt_exists, dimmed=removed))
         self._table.setItem(row, COL_DISCOVERED,  self._make_item(disc_date, center, dimmed=removed))
@@ -668,7 +902,14 @@ class MainWindow(QMainWindow):
             lambda _, a=acc: self._on_view_sources(a.device_id, a.username, a.id)
         )
 
-        self._table.setCellWidget(row, COL_ACTIONS, self._wrap_btns(open_btn, src_btn))
+        act_btn = QPushButton("\u2026")  # "…"
+        act_btn.setFixedHeight(24)
+        act_btn.setFixedWidth(32)
+        act_btn.setEnabled(not removed and self._operator_action_service is not None)
+        act_btn.setToolTip("Operator actions")
+        act_btn.clicked.connect(lambda _, a=acc, b=act_btn: self._show_action_menu(a, b))
+
+        self._table.setCellWidget(row, COL_ACTIONS, self._wrap_btns(open_btn, src_btn, act_btn))
 
     def _fill_orphan_row(self, row: int, disc: DiscoveredAccount) -> None:
         center = Qt.AlignmentFlag.AlignCenter
@@ -676,9 +917,15 @@ class MainWindow(QMainWindow):
         self._table.setItem(row, COL_USERNAME,    self._make_item(disc.username))
         self._table.setItem(row, COL_DEVICE,      self._make_item(disc.device_name))
         self._table.setItem(row, COL_STATUS,      self._make_item("Orphan", center, C_ORPHAN))
+        self._table.setItem(row, COL_TAGS,        self._make_item(disc.bot_tags_raw or "—", center))
         self._table.setItem(row, COL_FOLLOW,      self._make_item("—", center))
         self._table.setItem(row, COL_UNFOLLOW,    self._make_item("—", center))
         self._table.setItem(row, COL_LIMIT,       self._make_item("—", center))
+        self._table.setItem(row, COL_FOLLOW_TODAY, self._make_item("—", center))
+        self._table.setItem(row, COL_LIKE_TODAY,   self._make_item("—", center))
+        self._table.setItem(row, COL_FOLLOW_LIM,   self._make_item("—", center))
+        self._table.setItem(row, COL_LIKE_LIM,     self._make_item("—", center))
+        self._table.setItem(row, COL_REVIEW,       self._make_item("", center))
         self._table.setItem(row, COL_DATA_DB,     self._make_bool_item(disc.data_db_exists))
         self._table.setItem(row, COL_SOURCES_TXT, self._make_bool_item(disc.sources_txt_exists))
         self._table.setItem(row, COL_DISCOVERED,  self._make_item("—", center))
@@ -903,15 +1150,29 @@ class MainWindow(QMainWindow):
         self._worker.start()
 
     def _on_sync_done(self, sync_run: SyncRun) -> None:
-        msg = (
-            f"Sync complete — "
-            f"+{sync_run.accounts_added} added,  "
-            f"-{sync_run.accounts_removed} removed,  "
-            f"~{sync_run.accounts_updated} updated,  "
-            f"={sync_run.accounts_unchanged} unchanged"
-        )
-        self._set_status(msg)
         self._refresh_table()
+
+        active = sum(1 for a in self._all_accounts if a.is_active)
+        n_crit = 0
+        if self._recommendation_service:
+            try:
+                recs = self._generate_recommendations()
+                n_crit = sum(1 for r in recs if r.severity == "CRITICAL")
+            except Exception:
+                pass
+
+        parts = [
+            f"Sync complete: {active} accounts",
+            f"+{sync_run.accounts_added}" if sync_run.accounts_added else None,
+            f"-{sync_run.accounts_removed}" if sync_run.accounts_removed else None,
+            f"~{sync_run.accounts_updated}" if sync_run.accounts_updated else None,
+        ]
+        msg = ",  ".join(p for p in parts if p)
+        if n_crit:
+            msg += f"  \u2014  {n_crit} CRITICAL \u2014 Open Cockpit to review"
+        else:
+            msg += "  \u2014  Ready"
+        self._set_status(msg)
 
     # ------------------------------------------------------------------
     # User actions — FBR batch flow
@@ -1106,12 +1367,295 @@ class MainWindow(QMainWindow):
 
         on_delete = _handle_account_delete if account_id is not None else None
 
+        # Build cleanup callback for batch non-quality removal
+        def _handle_account_cleanup():
+            if account_id is None:
+                return None
+            return self._handle_rec_clean_account(account_id)
+
+        on_cleanup = _handle_account_cleanup if account_id is not None else None
+
         self._set_status("Ready.")
-        dlg = SourceDialog(inspection, fbr_result, usage_result, on_delete=on_delete, parent=self)
+        dlg = SourceDialog(
+            inspection, fbr_result, usage_result,
+            on_delete=on_delete, on_cleanup=on_cleanup, parent=self,
+        )
         dlg.exec()
 
         # Repopulate table so updated FBR cells are visible immediately
         self._apply_filter()
+
+    # ------------------------------------------------------------------
+    # User actions — session report
+    # ------------------------------------------------------------------
+
+    def _on_cockpit(self) -> None:
+        from oh.ui.cockpit_dialog import CockpitDialog
+        data = self._gather_cockpit_data()
+        if data is None:
+            return
+        accounts, recs, review, deletions, actions = data
+        dlg = CockpitDialog(
+            accounts=accounts,
+            recommendations=recs,
+            review_accounts=review,
+            recent_deletions=deletions,
+            recent_actions=actions,
+            operator_action_service=self._operator_action_service,
+            on_navigate_account=self._focus_account,
+            on_navigate_source=self._focus_source,
+            on_open_session_report=self._on_session_report,
+            on_open_recommendations=self._on_recommendations,
+            on_open_delete_history=self._open_delete_history,
+            on_open_action_history=self._on_action_history,
+            on_refresh=self._gather_cockpit_data,
+            parent=self,
+        )
+        dlg.exec()
+
+    def _gather_cockpit_data(self):
+        """Collect all data needed for the cockpit dialog."""
+        from datetime import date as _date
+        recs = self._generate_recommendations() if self._recommendation_service else []
+        review = self._accounts.get_flagged_for_review()
+        deletions = (
+            self._source_delete_service.history_repo.get_recent_actions(10)
+        )
+        today_str = _date.today().isoformat()
+        all_actions = (
+            self._operator_action_repo.get_recent(50)
+            if self._operator_action_repo else []
+        )
+        today_actions = [
+            a for a in all_actions
+            if a.performed_at and a.performed_at[:10] == today_str
+        ][:20]
+        return (self._all_accounts, recs, review, deletions, today_actions)
+
+    def _on_recommendations(self) -> None:
+        if not self._recommendation_service:
+            return
+        from oh.ui.recommendations_dialog import RecommendationsDialog
+        recs = self._generate_recommendations()
+        dlg = RecommendationsDialog(
+            recommendations=recs,
+            operator_action_service=self._operator_action_service,
+            on_refresh=self._generate_recommendations,
+            on_navigate_account=self._focus_account,
+            on_navigate_source=self._focus_source,
+            on_delete_source=self._handle_rec_delete_source,
+            on_clean_account=self._handle_rec_clean_account,
+            on_open_history=self._open_delete_history,
+            parent=self,
+        )
+        dlg.exec()
+        self._refresh_table()
+
+    def _handle_rec_delete_source(self, source_name):
+        """Callback: delete a source globally from RecommendationsDialog."""
+        bot_root = self._settings.get_bot_root()
+        if not bot_root:
+            return None
+        from oh.ui.delete_confirm_dialog import DeleteConfirmDialog
+        assignments = self._source_delete_service.get_active_assignments_for_source(
+            source_name
+        )
+        if not assignments:
+            return None
+        dlg = DeleteConfirmDialog.for_single(source_name, assignments, parent=self)
+        if dlg.exec() != DeleteConfirmDialog.DialogCode.Accepted:
+            return None
+        result = self._source_delete_service.delete_source_globally(
+            source_name, bot_root
+        )
+        self._refresh_after_source_op()
+        return result
+
+    def _handle_rec_clean_account(self, account_id):
+        """Callback: clean non-quality sources for one account."""
+        bot_root = self._settings.get_bot_root()
+        if not bot_root:
+            return None
+        candidates = self._source_delete_service.preview_account_cleanup(
+            account_id
+        )
+        if not candidates:
+            QMessageBox.information(
+                self, "No Candidates",
+                "No non-quality sources found.\n"
+                "Run Analyze FBR first if data is missing.",
+            )
+            return None
+        acc = self._accounts.get_by_id(account_id)
+        if not acc:
+            return None
+        src_count = self._source_count_map.get(account_id, 0)
+        from oh.ui.delete_confirm_dialog import DeleteConfirmDialog
+        dlg = DeleteConfirmDialog.for_account_cleanup(
+            acc.username,
+            acc.device_name or acc.device_id,
+            candidates,
+            total_active=src_count,
+            parent=self,
+        )
+        if dlg.exec() != DeleteConfirmDialog.DialogCode.Accepted:
+            return None
+        selected = dlg.selected_sources
+        if not selected:
+            return None
+        result = self._source_delete_service.delete_sources_for_account(
+            source_names=[s.source_name for s in selected],
+            account_id=account_id,
+            device_id=acc.device_id,
+            username=acc.username,
+            device_name=acc.device_name or acc.device_id,
+            bot_root=bot_root,
+        )
+        self._refresh_after_source_op()
+        return result
+
+    def _refresh_after_source_op(self) -> None:
+        """Refresh accounts table + source counts after any source operation."""
+        self._source_count_map = self._global_sources_service.get_active_source_counts()
+        self._all_accounts = self._accounts.get_all()
+        self._apply_filter()
+
+    def _open_delete_history(self) -> None:
+        """Switch to Sources tab and open Delete History dialog."""
+        self._tabs.setCurrentIndex(1)
+        self._sources_tab.set_bot_root(self._settings.get_bot_root())
+        self._sources_tab.load_data()
+        self._sources_tab._on_show_history()
+
+    def _focus_account(self, account_id: int) -> None:
+        """Navigate to an account row in the Accounts tab."""
+        self._tabs.setCurrentIndex(0)  # Switch to Accounts tab
+        for row in range(self._table.rowCount()):
+            item = self._table.item(row, COL_USERNAME)
+            if item:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if data and data[0] == "account" and data[1] == account_id:
+                    self._table.selectRow(row)
+                    self._table.scrollToItem(item)
+                    return
+
+    def _focus_source(self, source_name: str) -> None:
+        """Navigate to the Sources tab and filter by source name."""
+        self._tabs.setCurrentIndex(1)  # Switch to Sources tab
+        self._sources_tab.set_bot_root(self._settings.get_bot_root())
+        self._sources_tab.load_data()
+        # Set the search filter to the source name
+        if hasattr(self._sources_tab, '_search_box'):
+            self._sources_tab._search_box.setText(source_name)
+
+    def _generate_recommendations(self) -> list:
+        """Generate recommendations from current in-memory data."""
+        return self._recommendation_service.generate(
+            session_map=self._session_map,
+            fbr_map=self._fbr_map,
+            device_status_map=self._device_status_map,
+            op_tags_map=self._op_tags_map,
+        )
+
+    def _on_action_history(self) -> None:
+        if not self._operator_action_repo:
+            return
+        from oh.ui.operator_action_history_dialog import OperatorActionHistoryDialog
+        dlg = OperatorActionHistoryDialog(
+            action_repo=self._operator_action_repo,
+            parent=self,
+        )
+        dlg.exec()
+
+    def _on_session_report(self) -> None:
+        from oh.ui.session_report_dialog import SessionReportDialog
+        dlg = SessionReportDialog(
+            accounts=self._all_accounts,
+            session_map=self._session_map,
+            fbr_map=self._fbr_map,
+            device_status_map=self._device_status_map,
+            operator_action_service=self._operator_action_service,
+            parent=self,
+        )
+        dlg.exec()
+        # Refresh table in case report actions changed data
+        self._refresh_table()
+
+    # ------------------------------------------------------------------
+    # User actions — operator action menu (per-account)
+    # ------------------------------------------------------------------
+
+    def _show_action_menu(self, acc: AccountRecord, btn: QPushButton) -> None:
+        """Show a popup menu of operator actions for this account."""
+        svc = self._operator_action_service
+        if not svc:
+            return
+
+        menu = QMenu(self)
+
+        if acc.review_flag:
+            menu.addAction("Clear Review", lambda: self._do_clear_review(acc))
+        else:
+            menu.addAction("Set Review", lambda: self._do_set_review(acc))
+
+        menu.addSeparator()
+        menu.addAction("TB +1", lambda: self._do_tb_increment(acc))
+        menu.addAction("Limits +1", lambda: self._do_limits_increment(acc))
+
+        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _do_set_review(self, acc: AccountRecord) -> None:
+        note, ok = QInputDialog.getText(
+            self, "Set Review", f"Note for {acc.username} (optional):"
+        )
+        if not ok:
+            return
+        result = self._operator_action_service.set_review(acc.id, note or None)
+        self._set_status(f"Review set: {acc.username}")
+        self._refresh_table()
+
+    def _do_clear_review(self, acc: AccountRecord) -> None:
+        result = self._operator_action_service.clear_review(acc.id)
+        self._set_status(f"Review cleared: {acc.username}")
+        self._refresh_table()
+
+    def _do_tb_increment(self, acc: AccountRecord) -> None:
+        reply = QMessageBox.question(
+            self, "Confirm TB +1",
+            f"Increment TB level for {acc.username}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        result = self._operator_action_service.increment_tb(acc.id)
+        if result == "tb5_max":
+            QMessageBox.warning(
+                self, "TB5 Max",
+                f"{acc.username}: TB5 reached \u2014 konto wymaga przeniesienia na inne urz\u0105dzenie.",
+            )
+            self._set_status(f"{acc.username}: TB5 max \u2014 przeniesienie wymagane")
+        else:
+            self._set_status(f"{acc.username}: \u2192 {result}")
+        self._refresh_table()
+
+    def _do_limits_increment(self, acc: AccountRecord) -> None:
+        reply = QMessageBox.question(
+            self, "Confirm Limits +1",
+            f"Increment limits level for {acc.username}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        result = self._operator_action_service.increment_limits(acc.id)
+        if result == "limits5_max":
+            QMessageBox.warning(
+                self, "Limits 5 Max",
+                f"{acc.username}: limits 5 reached \u2014 rozwa\u017c wymian\u0119 \u017ar\u00f3de\u0142.",
+            )
+            self._set_status(f"{acc.username}: limits 5 max \u2014 wymiana \u017ar\u00f3de\u0142")
+        else:
+            self._set_status(f"{acc.username}: \u2192 {result}")
+        self._refresh_table()
 
     # ------------------------------------------------------------------
     # User actions — folder and row interaction

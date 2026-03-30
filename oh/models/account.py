@@ -39,6 +39,13 @@ class AccountRecord:
     unfollow_enabled: Optional[bool] = None
     limit_per_day: Optional[str] = None
     last_metadata_updated_at: Optional[str] = None
+    # --- Stage 1 fields (migration 006) ---
+    review_flag: bool = False
+    review_note: Optional[str] = None
+    review_set_at: Optional[str] = None
+    bot_tags_raw: Optional[str] = None
+    like_limit_perday: Optional[str] = None
+    follow_limit_perday: Optional[str] = None
 
     @property
     def is_active(self) -> bool:
@@ -70,3 +77,7 @@ class DiscoveredAccount:
     # Validity flags
     is_orphan_folder: bool = False      # folder exists on disk but not in accounts.db
     is_missing_folder: bool = False     # in accounts.db but no folder on disk
+    # --- Stage 1 fields (populated from bot's settings.db) ---
+    bot_tags_raw: Optional[str] = None
+    follow_limit_perday: Optional[str] = None
+    like_limit_perday: Optional[str] = None

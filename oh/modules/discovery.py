@@ -98,6 +98,15 @@ class DiscoveryModule:
                 acct_folder = device_folder / username
                 folder_exists = acct_folder.is_dir()
 
+                # Read tags and limits from per-account settings.db
+                bot_tags_raw = None
+                follow_limit_perday = None
+                like_limit_perday = None
+                if folder_exists:
+                    bot_tags_raw, follow_limit_perday, like_limit_perday = (
+                        self._read_settings_db(acct_folder / "settings.db")
+                    )
+
                 results.append(DiscoveredAccount(
                     device_id=device_id,
                     device_name=device_name,
@@ -112,6 +121,9 @@ class DiscoveryModule:
                     start_time=acc.get("starttime"),
                     end_time=acc.get("endtime"),
                     is_missing_folder=not folder_exists,
+                    bot_tags_raw=bot_tags_raw,
+                    follow_limit_perday=follow_limit_perday,
+                    like_limit_perday=like_limit_perday,
                 ))
 
             # --- Orphan folders: on disk but not in accounts.db ---
@@ -176,3 +188,41 @@ class DiscoveryModule:
             # Non-fatal: log and return empty so the device is not silently skipped
             logger.warning(f"Cannot read accounts from {path}: {e}")
             return []
+
+    def _read_settings_db(
+        self, path: Path
+    ) -> tuple:
+        """
+        Read tags and limits from a per-account settings.db.
+
+        Returns (bot_tags_raw, follow_limit_perday, like_limit_perday).
+        All values are Optional[str].  Returns (None, None, None) if the
+        file is missing, unreadable, or has no settings row.
+        """
+        if not path.exists():
+            return None, None, None
+        try:
+            import json as _json
+            uri = f"file:{path.as_posix()}?mode=ro"
+            with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=5)) as conn:
+                row = conn.execute(
+                    "SELECT settings FROM accountsettings LIMIT 1"
+                ).fetchone()
+            if not row or not row[0]:
+                return None, None, None
+            settings = _json.loads(row[0])
+            tags_raw = settings.get("tags")
+            if isinstance(tags_raw, str):
+                tags_raw = tags_raw.strip() or None
+            else:
+                tags_raw = None
+            follow_limit = settings.get("default_action_limit_perday")
+            like_limit = settings.get("like_limit_perday")
+            return (
+                tags_raw,
+                str(follow_limit) if follow_limit is not None else None,
+                str(like_limit) if like_limit is not None else None,
+            )
+        except (sqlite3.OperationalError, _json.JSONDecodeError, Exception) as e:
+            logger.warning(f"Cannot read settings from {path}: {e}")
+            return None, None, None

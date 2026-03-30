@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 
+from oh.models.fbr import SourceFBRRecord
 from oh.models.global_source import GlobalSourceRecord
 
 
@@ -72,6 +73,28 @@ class DeleteConfirmDialog(QDialog):
         dlg.setWindowTitle("Confirm Source Deletion")
         dlg._build_single_account(source_name, username, device_name)
         return dlg
+
+    @classmethod
+    def for_account_cleanup(
+        cls,
+        username: str,
+        device_name: str,
+        sources: list,
+        total_active: int = 0,
+        parent=None,
+    ) -> "DeleteConfirmDialog":
+        """Preview non-quality sources to remove from one account."""
+        dlg = cls(parent)
+        dlg.setWindowTitle("Confirm Account Source Cleanup")
+        dlg._selected_sources = list(sources)  # mutable; updated by checkboxes
+        dlg._build_account_cleanup(username, device_name, sources, total_active)
+        return dlg
+
+    @property
+    def selected_sources(self) -> list:
+        """Return the list of sources the operator chose to delete.
+        Only meaningful after for_account_cleanup()."""
+        return getattr(self, "_selected_sources", [])
 
     @classmethod
     def for_revert(
@@ -264,6 +287,100 @@ class DeleteConfirmDialog(QDialog):
         confirm_btn.clicked.connect(self.accept)
         row_lo.addWidget(confirm_btn)
         lo.addLayout(row_lo)
+
+    def _build_account_cleanup(
+        self,
+        username: str,
+        device_name: str,
+        sources: list,
+        total_active: int,
+    ) -> None:
+        from PySide6.QtWidgets import QCheckBox
+
+        lo = QVBoxLayout(self)
+        lo.setSpacing(12)
+
+        lo.addWidget(self._warning_label(
+            f"Remove non-quality sources: {username}"
+        ))
+
+        remaining = total_active - len(sources)
+        lo.addWidget(QLabel(
+            f"Account: <b>{username}</b> on <b>{device_name}</b><br>"
+            f"<b>{len(sources)}</b> non-quality source(s) selected for removal. "
+            f"<b>{remaining}</b> source(s) will remain."
+        ))
+
+        if remaining < 5 and remaining >= 0:
+            warn = QLabel(
+                f"Warning: only {remaining} source(s) will remain after cleanup."
+            )
+            warn.setStyleSheet("color: #e6a817; font-weight: bold;")
+            lo.addWidget(warn)
+
+        # Table with checkboxes
+        t = QTableWidget(len(sources), 4)
+        t.setHorizontalHeaderLabels(["Remove", "Source", "Follows", "FBR %"])
+        t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        t.verticalHeader().setVisible(False)
+        t.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        t.setColumnWidth(0, 55)
+        t.setColumnWidth(2, 70)
+        t.setColumnWidth(3, 70)
+        t.setMaximumHeight(250)
+        t.setSortingEnabled(False)
+
+        center = Qt.AlignmentFlag.AlignCenter
+        self._checkboxes = []
+
+        for r, src in enumerate(sources):
+            cb = QCheckBox()
+            cb.setChecked(True)
+            cb.stateChanged.connect(self._on_checkbox_changed)
+            self._checkboxes.append((cb, src))
+            cb_widget = QFrame()
+            cb_lo = QHBoxLayout(cb_widget)
+            cb_lo.setContentsMargins(0, 0, 0, 0)
+            cb_lo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cb_lo.addWidget(cb)
+            t.setCellWidget(r, 0, cb_widget)
+
+            t.setItem(r, 1, QTableWidgetItem(src.source_name))
+
+            follows_item = QTableWidgetItem(str(src.follow_count))
+            follows_item.setTextAlignment(center)
+            t.setItem(r, 2, follows_item)
+
+            fbr_item = QTableWidgetItem(f"{src.fbr_percent:.1f}%")
+            fbr_item.setTextAlignment(center)
+            fbr_item.setForeground(QColor("#e05555"))
+            t.setItem(r, 3, fbr_item)
+
+        lo.addWidget(t)
+        self._cleanup_table = t
+
+        lo.addWidget(self._note(
+            "Uncheck sources you want to keep.\n"
+            "data.db (follow history) is NOT modified.\n"
+            "A backup (sources.txt.bak) will be created before each file write."
+        ))
+
+        self._confirm_btn_ref = None
+        row_lo = self._button_row(f"Remove {len(sources)} source(s)")
+        # Find the confirm button to update its text on checkbox changes
+        for i in range(row_lo.count()):
+            w = row_lo.itemAt(i).widget()
+            if w and isinstance(w, QPushButton) and w is not self.findChild(QPushButton, ""):
+                if "Remove" in w.text():
+                    self._confirm_btn_ref = w
+        lo.addLayout(row_lo)
+
+    def _on_checkbox_changed(self) -> None:
+        """Update selected_sources and confirm button text when checkboxes change."""
+        selected = [src for cb, src in self._checkboxes if cb.isChecked()]
+        self._selected_sources = selected
+        if self._confirm_btn_ref:
+            self._confirm_btn_ref.setText(f"Remove {len(selected)} source(s)")
 
     # ------------------------------------------------------------------
     # Helpers

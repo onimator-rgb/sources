@@ -24,9 +24,15 @@ from oh.repositories.fbr_snapshot_repo import FBRSnapshotRepository
 from oh.repositories.settings_repo import SettingsRepository
 from oh.repositories.source_assignment_repo import SourceAssignmentRepository
 from oh.repositories.sync_repo import SyncRepository
+from oh.repositories.operator_action_repo import OperatorActionRepository
+from oh.repositories.session_repo import SessionRepository
+from oh.repositories.tag_repo import TagRepository
 from oh.services.fbr_service import FBRService
+from oh.services.operator_action_service import OperatorActionService
+from oh.services.recommendation_service import RecommendationService
 from oh.services.global_sources_service import GlobalSourcesService
 from oh.services.scan_service import ScanService
+from oh.services.session_service import SessionService
 from oh.services.source_delete_service import SourceDeleteService
 from oh.resources import asset_path, asset_exists
 from oh.ui.main_window import MainWindow
@@ -194,20 +200,30 @@ def main() -> None:
         app.setWindowIcon(QIcon(str(asset_path("oh.ico"))))
 
     assignment_repo = SourceAssignmentRepository(conn)
+    account_repo    = AccountRepository(conn)
+    tag_repo        = TagRepository(conn)
+
+    session_service = SessionService(
+        session_repo=SessionRepository(conn),
+        tag_repo=tag_repo,
+        account_repo=account_repo,
+    )
 
     scan_service = ScanService(
-        account_repo=AccountRepository(conn),
+        account_repo=account_repo,
         device_repo=DeviceRepository(conn),
         sync_repo=SyncRepository(conn),
+        session_service=session_service,
     )
+    fbr_snapshot_repo     = FBRSnapshotRepository(conn)
     fbr_service = FBRService(
-        snapshot_repo=FBRSnapshotRepository(conn),
-        account_repo=AccountRepository(conn),
+        snapshot_repo=fbr_snapshot_repo,
+        account_repo=account_repo,
         settings_repo=settings_repo,
         assignment_repo=assignment_repo,
     )
     global_sources_service = GlobalSourcesService(
-        account_repo=AccountRepository(conn),
+        account_repo=account_repo,
         assignment_repo=assignment_repo,
     )
     delete_history_repo   = DeleteHistoryRepository(conn)
@@ -216,9 +232,25 @@ def main() -> None:
         history_repo=delete_history_repo,
         settings_repo=settings_repo,
         global_sources_service=global_sources_service,
+        fbr_snapshot_repo=fbr_snapshot_repo,
     )
 
     logger.info("All services initialised.  Launching main window.")
+
+    operator_action_repo = OperatorActionRepository(conn)
+
+    operator_action_service = OperatorActionService(
+        account_repo=account_repo,
+        tag_repo=tag_repo,
+        action_repo=operator_action_repo,
+    )
+
+    recommendation_service = RecommendationService(
+        global_sources_service=global_sources_service,
+        account_repo=account_repo,
+        tag_repo=tag_repo,
+        settings_repo=settings_repo,
+    )
 
     window = MainWindow(
         conn,
@@ -226,6 +258,11 @@ def main() -> None:
         fbr_service,
         global_sources_service,
         source_delete_service,
+        session_service=session_service,
+        operator_action_service=operator_action_service,
+        operator_action_repo=operator_action_repo,
+        tag_repo=tag_repo,
+        recommendation_service=recommendation_service,
     )
     window.show()
 

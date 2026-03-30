@@ -107,6 +107,7 @@ class SourceDialog(QDialog):
         fbr: FBRAnalysisResult,
         usage: Optional[SourceUsageResult] = None,
         on_delete: Optional[Callable] = None,
+        on_cleanup: Optional[Callable] = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -114,6 +115,7 @@ class SourceDialog(QDialog):
         self._fbr = fbr
         self._usage = usage
         self._on_delete = on_delete
+        self._on_cleanup = on_cleanup
 
         # Pre-build FBR lookup keyed by normalized (strip + lower) name so that
         # minor casing/whitespace differences between sources.txt and data.db
@@ -579,6 +581,16 @@ class SourceDialog(QDialog):
             self._delete_btn.clicked.connect(self._on_delete_clicked)
             lo.addWidget(self._delete_btn)
 
+        if self._on_cleanup is not None:
+            cleanup_btn = QPushButton("Remove Non-Quality Sources")
+            cleanup_btn.setFixedWidth(200)
+            cleanup_btn.setStyleSheet(
+                "QPushButton { color: #e6a817; }"
+                "QPushButton:hover { background: #3a2e00; }"
+            )
+            cleanup_btn.clicked.connect(self._on_cleanup_clicked)
+            lo.addWidget(cleanup_btn)
+
         lo.addStretch()
         close_btn = QPushButton("Close")
         close_btn.setFixedWidth(80)
@@ -647,6 +659,48 @@ class SourceDialog(QDialog):
                 self,
                 "Delete Error",
                 f"Error deleting '{source_name}':\n\n{e}",
+            )
+
+    def _on_cleanup_clicked(self) -> None:
+        """Handle Remove Non-Quality Sources button click."""
+        if self._on_cleanup is None:
+            return
+        try:
+            result = self._on_cleanup()
+            if result is None:
+                return  # cancelled or no candidates
+            n = result.accounts_removed
+            if n > 0:
+                QMessageBox.information(
+                    self,
+                    "Cleanup Complete",
+                    f"Removed {n} non-quality source(s) from "
+                    f"{self._inspection.username}.\n\n"
+                    "Revert available in Sources tab \u2192 History.",
+                )
+                # Gray out deleted rows in the table
+                if hasattr(self, '_source_table'):
+                    deleted_names = set(
+                        s.lower() for s in result.sources_attempted
+                    )
+                    for row in range(self._source_table.rowCount()):
+                        item = self._source_table.item(row, COL_SOURCE)
+                        if item and item.text().strip().lower() in deleted_names:
+                            for col in range(self._source_table.columnCount()):
+                                cell = self._source_table.item(row, col)
+                                if cell:
+                                    cell.setForeground(_C_LOW_FBR)
+            elif result.accounts_not_found > 0:
+                QMessageBox.information(
+                    self,
+                    "Already Absent",
+                    "Selected sources were not found in sources.txt.",
+                )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Cleanup Error",
+                f"Error during cleanup:\n\n{e}",
             )
 
 

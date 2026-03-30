@@ -25,11 +25,15 @@ import logging
 import socket
 from datetime import datetime, timezone
 
+from typing import Optional
+
 from oh.models.delete_history import DeleteAction, DeleteItem, SourceDeleteResult
+from oh.models.fbr import SourceFBRRecord
 from oh.models.global_source import GlobalSourceRecord
 from oh.modules.source_deleter import SourceDeleter
 from oh.modules.source_restorer import SourceRestorer
 from oh.repositories.delete_history_repo import DeleteHistoryRepository
+from oh.repositories.fbr_snapshot_repo import FBRSnapshotRepository
 from oh.repositories.settings_repo import SettingsRepository
 from oh.repositories.source_assignment_repo import SourceAssignmentRepository
 from oh.services.global_sources_service import GlobalSourcesService
@@ -48,11 +52,13 @@ class SourceDeleteService:
         history_repo: DeleteHistoryRepository,
         settings_repo: SettingsRepository,
         global_sources_service: GlobalSourcesService,
+        fbr_snapshot_repo: Optional[FBRSnapshotRepository] = None,
     ) -> None:
         self._assignments  = assignment_repo
         self._history      = history_repo
         self._settings     = settings_repo
         self._sources_svc  = global_sources_service
+        self._fbr_repo     = fbr_snapshot_repo
 
     # ------------------------------------------------------------------
     # Public accessors (used by UI to avoid reaching into internals)
@@ -310,6 +316,124 @@ class SourceDeleteService:
         logger.info(
             f"[Delete] scope=account source='{source_name}' account={username} "
             f"removed={fr.removed} found={fr.found} backed_up={fr.backed_up} "
+            f"action_id={result.action_id}"
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # Account cleanup — preview and batch delete for one account
+    # ------------------------------------------------------------------
+
+    def preview_account_cleanup(
+        self, account_id: int
+    ) -> list[SourceFBRRecord]:
+        """
+        Return non-quality sources for one account from the latest FBR
+        snapshot.  Only sources with enough follow data to be assessed
+        are included.  Sorted by fbr_percent ASC (worst first).
+
+        Returns empty list if no FBR data is available or no candidates.
+        """
+        if self._fbr_repo is None:
+            logger.warning(
+                "[Delete] preview_account_cleanup: no FBR repo available"
+            )
+            return []
+
+        snapshots = self._fbr_repo.get_for_account(account_id)
+        if not snapshots:
+            return []
+
+        latest = snapshots[0]
+        results = self._fbr_repo.get_source_results(latest.id)
+        min_follows = int(self._settings.get("min_follows_threshold") or "100")
+
+        candidates = [
+            r for r in results
+            if not r.is_quality and r.follow_count >= min_follows
+        ]
+        candidates.sort(key=lambda r: (r.fbr_percent, -r.follow_count))
+
+        logger.info(
+            f"[Delete] preview_account_cleanup: account_id={account_id} "
+            f"snapshot={latest.id} total_results={len(results)} "
+            f"candidates={len(candidates)}"
+        )
+        return candidates
+
+    def delete_sources_for_account(
+        self,
+        source_names: list,
+        account_id: int,
+        device_id: str,
+        username: str,
+        device_name: str,
+        bot_root: str,
+        notes: Optional[str] = None,
+    ) -> SourceDeleteResult:
+        """
+        Delete multiple sources from one account in a single audit action.
+
+        Each source is removed from sources.txt individually.  Failures
+        on individual sources do not abort the batch — partial success
+        is reported in the result.
+
+        One DeleteAction with N DeleteItems is created (not N actions).
+        """
+        result = SourceDeleteResult(sources_attempted=list(source_names))
+
+        if not source_names:
+            return result
+
+        deleter = SourceDeleter(bot_root)
+        items: list[DeleteItem] = []
+
+        for src_name in source_names:
+            result.accounts_attempted += 1
+            fr = deleter.remove_source(device_id, username, device_name, src_name)
+
+            affected_details = []
+            if fr.removed:
+                result.accounts_removed += 1
+                self._assignments.mark_source_inactive(account_id, src_name)
+                affected_details.append({
+                    "account_id": account_id,
+                    "device_id": device_id,
+                    "username": username,
+                    "device_name": device_name,
+                })
+            elif not fr.found:
+                result.accounts_not_found += 1
+                self._assignments.mark_source_inactive(account_id, src_name)
+            else:
+                result.accounts_failed += 1
+                result.errors.append(f"{src_name}: {fr.error}")
+
+            items.append(DeleteItem(
+                source_name=src_name,
+                affected_accounts=[username] if fr.removed else [],
+                affected_details=affected_details,
+                files_removed=1 if fr.removed else 0,
+                files_not_found=1 if (not fr.found and not fr.error) else 0,
+                files_failed=1 if fr.error else 0,
+                errors=[fr.error] if fr.error else [],
+            ))
+
+        action = DeleteAction(
+            deleted_at=_utcnow(),
+            delete_type="bulk",
+            scope="account",
+            total_sources=len(source_names),
+            total_accounts_affected=1 if result.accounts_removed > 0 else 0,
+            machine=socket.gethostname(),
+            notes=notes or f"Account cleanup: {username}",
+        )
+        result.action_id = self._history.save_action(action, items)
+
+        logger.info(
+            f"[Delete] scope=account_cleanup account={username} "
+            f"sources={len(source_names)} removed={result.accounts_removed} "
+            f"absent={result.accounts_not_found} failed={result.accounts_failed} "
             f"action_id={result.action_id}"
         )
         return result

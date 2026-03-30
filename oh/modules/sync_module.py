@@ -135,6 +135,9 @@ class SyncModule:
                 end_time=disc.end_time,
                 data_db_exists=disc.data_db_exists,
                 sources_txt_exists=disc.sources_txt_exists,
+                bot_tags_raw=disc.bot_tags_raw,
+                follow_limit_perday=disc.follow_limit_perday,
+                like_limit_perday=disc.like_limit_perday,
             )
 
             existing = self._account_repo.get_by_device_and_username(
@@ -194,11 +197,14 @@ def _metadata_diff(existing: AccountRecord, disc: DiscoveredAccount) -> dict:
     """Returns a dict of {field: [old, new]} for any changed metadata fields."""
     changes = {}
     checks = [
-        ("follow_enabled",    existing.follow_enabled,    disc.follow_enabled),
-        ("unfollow_enabled",  existing.unfollow_enabled,  disc.unfollow_enabled),
-        ("limit_per_day",     existing.limit_per_day,     disc.limit_per_day),
-        ("start_time",        existing.start_time,        disc.start_time),
-        ("end_time",          existing.end_time,           disc.end_time),
+        ("follow_enabled",      existing.follow_enabled,      disc.follow_enabled),
+        ("unfollow_enabled",    existing.unfollow_enabled,    disc.unfollow_enabled),
+        ("limit_per_day",       existing.limit_per_day,       disc.limit_per_day),
+        ("start_time",          existing.start_time,          disc.start_time),
+        ("end_time",            existing.end_time,            disc.end_time),
+        ("bot_tags_raw",        existing.bot_tags_raw,        disc.bot_tags_raw),
+        ("follow_limit_perday", existing.follow_limit_perday, disc.follow_limit_perday),
+        ("like_limit_perday",   existing.like_limit_perday,   disc.like_limit_perday),
     ]
     for field, old, new in checks:
         if old != new:
