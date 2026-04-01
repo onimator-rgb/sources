@@ -327,6 +327,59 @@ CREATE INDEX IF NOT EXISTS idx_op_actions_type
 """
 
 # ---------------------------------------------------------------------------
+# Migration 008 — source finder tables
+# ---------------------------------------------------------------------------
+
+_MIGRATION_008_SQL = """
+CREATE TABLE IF NOT EXISTS source_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES oh_accounts(id),
+    username TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    step_reached INTEGER NOT NULL DEFAULT 0,
+    query_used TEXT,
+    error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_searches_account
+    ON source_searches(account_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS source_search_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_id INTEGER NOT NULL REFERENCES source_searches(id),
+    username TEXT NOT NULL,
+    full_name TEXT,
+    follower_count INTEGER NOT NULL DEFAULT 0,
+    bio TEXT,
+    source_type TEXT NOT NULL DEFAULT 'suggested',
+    is_private INTEGER NOT NULL DEFAULT 0,
+    is_verified INTEGER NOT NULL DEFAULT 0,
+    is_enriched INTEGER NOT NULL DEFAULT 0,
+    avg_er REAL,
+    ai_score REAL,
+    ai_category TEXT,
+    profile_pic_url TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_candidates_search
+    ON source_search_candidates(search_id);
+
+CREATE TABLE IF NOT EXISTS source_search_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_id INTEGER NOT NULL REFERENCES source_searches(id),
+    candidate_id INTEGER NOT NULL REFERENCES source_search_candidates(id),
+    rank INTEGER NOT NULL,
+    added_to_sources INTEGER NOT NULL DEFAULT 0,
+    added_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_results_search
+    ON source_search_results(search_id, rank)
+"""
+
+# ---------------------------------------------------------------------------
 # Registry — append new entries here, never modify existing ones
 # ---------------------------------------------------------------------------
 
@@ -338,6 +391,7 @@ _MIGRATIONS: List[Tuple[int, str, str]] = [
     (5, "delete_revert_support", _MIGRATION_005_SQL),
     (6, "session_and_tags",     _MIGRATION_006_SQL),
     (7, "operator_actions",     _MIGRATION_007_SQL),
+    (8, "source_finder",        _MIGRATION_008_SQL),
 ]
 
 

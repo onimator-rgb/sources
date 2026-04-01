@@ -176,6 +176,7 @@ class MainWindow(QMainWindow):
         operator_action_repo=None,
         tag_repo=None,
         recommendation_service: Optional[RecommendationService] = None,
+        source_finder_service=None,
     ) -> None:
         super().__init__()
         self._scan_service            = scan_service
@@ -187,6 +188,7 @@ class MainWindow(QMainWindow):
         self._operator_action_repo    = operator_action_repo
         self._tag_repo                = tag_repo
         self._recommendation_service  = recommendation_service
+        self._source_finder_service   = source_finder_service
         self._settings                = SettingsRepository(conn)
         self._accounts                = AccountRepository(conn)
         self._sync_repo               = SyncRepository(conn)
@@ -1635,6 +1637,10 @@ class MainWindow(QMainWindow):
         menu.addAction("TB +1", lambda: self._do_tb_increment(acc))
         menu.addAction("Limits +1", lambda: self._do_limits_increment(acc))
 
+        if self._source_finder_service is not None:
+            menu.addSeparator()
+            menu.addAction("Find Sources", lambda: self._on_find_sources(acc))
+
         menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     def _do_set_review(self, acc: AccountRecord) -> None:
@@ -1689,6 +1695,36 @@ class MainWindow(QMainWindow):
         else:
             self._set_status(f"{acc.username}: \u2192 {result}")
         self._refresh_table()
+
+    def _on_find_sources(self, acc: AccountRecord) -> None:
+        """Open the Source Finder dialog for an account."""
+        bot_root = self._get_validated_root()
+        if not bot_root:
+            return
+
+        hiker_key = self._settings.get("hiker_api_key") or ""
+        if not hiker_key:
+            QMessageBox.warning(
+                self,
+                "API Key Required",
+                "HikerAPI key is not configured.\n\n"
+                "Go to Settings tab and enter your HikerAPI key "
+                "in the Source Finder section.",
+            )
+            return
+
+        from oh.ui.source_finder_dialog import SourceFinderDialog
+
+        dlg = SourceFinderDialog(
+            self,
+            self._source_finder_service,
+            acc.id,
+            acc.username,
+            bot_root,
+        )
+        result = dlg.exec()
+        if result == SourceFinderDialog.DialogCode.Accepted:
+            self._refresh_table()
 
     # ------------------------------------------------------------------
     # User actions — folder and row interaction

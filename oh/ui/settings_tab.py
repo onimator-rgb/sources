@@ -2,16 +2,19 @@
 SettingsTab — configurable OH settings exposed to operators.
 
 Groups:
-  FBR Analysis     — follow count threshold, quality FBR%
-  Source Cleanup   — weak-source delete threshold, min source count warning
+  FBR Analysis           — follow count threshold, quality FBR%
+  Source Cleanup         — weak-source delete threshold, min source count warning
+  Source Finder API Keys — HikerAPI and Gemini API keys
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QGroupBox, QPushButton, QLabel, QDoubleSpinBox, QSpinBox, QComboBox,
+    QLineEdit,
 )
 from PySide6.QtCore import Qt
 
 from oh.repositories.settings_repo import SettingsRepository
+from oh.ui.style import sc
 
 
 class SettingsTab(QWidget):
@@ -95,6 +98,33 @@ class SettingsTab(QWidget):
 
         outer.addWidget(app_group)
 
+        # -- Source Finder — API Keys group --
+        sf_group = QGroupBox("Source Finder — API Keys")
+        sf_form  = QFormLayout(sf_group)
+        sf_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._hiker_key_edit = QLineEdit()
+        self._hiker_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._hiker_key_edit.setFixedWidth(300)
+        self._hiker_key_edit.setPlaceholderText("Enter HikerAPI key")
+        sf_form.addRow("HikerAPI Key:", self._hiker_key_edit)
+
+        self._gemini_key_edit = QLineEdit()
+        self._gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._gemini_key_edit.setFixedWidth(300)
+        self._gemini_key_edit.setPlaceholderText("Enter Gemini API key")
+        sf_form.addRow("Gemini API Key:", self._gemini_key_edit)
+
+        sf_hint = QLabel(
+            "Keys are stored locally. HikerAPI is required for source discovery, "
+            "Gemini is optional for AI scoring."
+        )
+        sf_hint.setWordWrap(True)
+        sf_hint.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        sf_form.addRow("", sf_hint)
+
+        outer.addWidget(sf_group)
+
         # -- Save button --
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -105,7 +135,7 @@ class SettingsTab(QWidget):
         outer.addLayout(btn_row)
 
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("color: #4caf7d; font-size: 11px;")
+        self._status_label.setStyleSheet(f"color: {sc('success').name()}; font-size: 11px;")
         outer.addWidget(self._status_label, alignment=Qt.AlignmentFlag.AlignRight)
 
         outer.addStretch()
@@ -120,12 +150,17 @@ class SettingsTab(QWidget):
         idx = self._theme_combo.findText(current_theme)
         if idx >= 0:
             self._theme_combo.setCurrentIndex(idx)
+        self._hiker_key_edit.setText(self._settings.get("hiker_api_key") or "")
+        self._gemini_key_edit.setText(self._settings.get("gemini_api_key") or "")
 
     def _save(self) -> None:
         self._settings.set("min_follows_threshold",        str(self._min_follows_spin.value()))
         self._settings.set("min_fbr_threshold",            str(self._min_fbr_spin.value()))
         self._settings.set("weak_source_delete_threshold", str(self._delete_thresh_spin.value()))
         self._settings.set("min_source_count_warning",     str(self._min_src_spin.value()))
+
+        self._settings.set("hiker_api_key",  self._hiker_key_edit.text().strip())
+        self._settings.set("gemini_api_key", self._gemini_key_edit.text().strip())
 
         new_theme = self._theme_combo.currentText()
         old_theme = self._settings.get("theme") or "dark"

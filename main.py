@@ -23,6 +23,7 @@ from oh.repositories.device_repo import DeviceRepository
 from oh.repositories.fbr_snapshot_repo import FBRSnapshotRepository
 from oh.repositories.settings_repo import SettingsRepository
 from oh.repositories.source_assignment_repo import SourceAssignmentRepository
+from oh.repositories.source_search_repo import SourceSearchRepository
 from oh.repositories.sync_repo import SyncRepository
 from oh.repositories.operator_action_repo import OperatorActionRepository
 from oh.repositories.session_repo import SessionRepository
@@ -34,6 +35,7 @@ from oh.services.global_sources_service import GlobalSourcesService
 from oh.services.scan_service import ScanService
 from oh.services.session_service import SessionService
 from oh.services.source_delete_service import SourceDeleteService
+from oh.services.source_finder_service import SourceFinderService
 from oh.resources import asset_path, asset_exists
 from oh.ui.main_window import MainWindow
 from oh.ui.style import get_stylesheet, apply_palette, set_current_theme
@@ -227,6 +229,13 @@ def main() -> None:
         action_repo=operator_action_repo,
     )
 
+    source_search_repo = SourceSearchRepository(conn)
+    source_finder_service = SourceFinderService(
+        search_repo=source_search_repo,
+        account_repo=account_repo,
+        settings_repo=settings_repo,
+    )
+
     recommendation_service = RecommendationService(
         global_sources_service=global_sources_service,
         account_repo=account_repo,
@@ -245,6 +254,7 @@ def main() -> None:
         operator_action_repo=operator_action_repo,
         tag_repo=tag_repo,
         recommendation_service=recommendation_service,
+        source_finder_service=source_finder_service,
     )
     window.show()
 

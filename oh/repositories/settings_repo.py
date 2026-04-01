@@ -18,6 +18,8 @@ _CONFIG_DEFAULTS = [
     ("theme",                        "dark",  "UI theme: dark or light"),
     ("weak_source_delete_threshold", "5.0",   "FBR% at or below which a source is considered weak for bulk deletion"),
     ("min_source_count_warning",     "5",     "Warn if an account has fewer active sources than this"),
+    ("hiker_api_key",               "",      "HikerAPI access key for Instagram data"),
+    ("gemini_api_key",              "",      "Google Gemini API key for AI scoring"),
 ]
 
 
