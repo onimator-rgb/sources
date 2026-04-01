@@ -333,7 +333,7 @@ class MainWindow(QMainWindow):
         w = QWidget()
         lo = QHBoxLayout(w)
         lo.setContentsMargins(0, 4, 0, 4)
-        lo.setSpacing(10)
+        lo.setSpacing(6)
 
         self._scan_btn = QPushButton("⟳  Scan & Sync")
         self._scan_btn.setFixedHeight(34)
@@ -374,12 +374,12 @@ class MainWindow(QMainWindow):
         self._cockpit_btn.setToolTip("Daily operations overview")
         self._cockpit_btn.clicked.connect(self._on_cockpit)
 
-        self._history_btn = QPushButton("Action History")
+        self._history_btn = QPushButton("History")
         self._history_btn.setFixedHeight(34)
         self._history_btn.setToolTip("Show recent operator actions")
         self._history_btn.clicked.connect(self._on_action_history)
 
-        self._recs_btn = QPushButton("Recommendations")
+        self._recs_btn = QPushButton("Recs")
         self._recs_btn.setFixedHeight(34)
         self._recs_btn.setToolTip("Generate and view operational recommendations")
         self._recs_btn.clicked.connect(self._on_recommendations)
@@ -400,7 +400,7 @@ class MainWindow(QMainWindow):
         w = QWidget()
         lo = QHBoxLayout(w)
         lo.setContentsMargins(0, 4, 0, 4)
-        lo.setSpacing(10)
+        lo.setSpacing(4)
 
         # Status filter
         lo.addWidget(QLabel("Status:"))
@@ -413,8 +413,6 @@ class MainWindow(QMainWindow):
         self._status_filter.setFixedWidth(110)
         self._status_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._status_filter)
-
-        lo.addSpacing(4)
 
         # FBR state filter
         lo.addWidget(QLabel("FBR:"))
@@ -434,16 +432,12 @@ class MainWindow(QMainWindow):
         self._fbr_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._fbr_filter)
 
-        lo.addSpacing(4)
-
         # Device filter
         lo.addWidget(QLabel("Device:"))
         self._device_filter = QComboBox()
         self._device_filter.setFixedWidth(130)
         self._device_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._device_filter)
-
-        lo.addSpacing(4)
 
         # Text search
         lo.addWidget(QLabel("Search:"))
@@ -452,10 +446,6 @@ class MainWindow(QMainWindow):
         self._search_box.setFixedWidth(200)
         self._search_box.textChanged.connect(self._apply_filter)
         lo.addWidget(self._search_box)
-
-        lo.addSpacing(4)
-
-        lo.addSpacing(4)
 
         # Tags filter
         lo.addWidget(QLabel("Tags:"))
@@ -469,8 +459,6 @@ class MainWindow(QMainWindow):
         self._tags_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._tags_filter)
 
-        lo.addSpacing(4)
-
         # Activity filter
         lo.addWidget(QLabel("Activity:"))
         self._activity_filter = QComboBox()
@@ -480,8 +468,6 @@ class MainWindow(QMainWindow):
         self._activity_filter.setFixedWidth(120)
         self._activity_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._activity_filter)
-
-        lo.addSpacing(4)
 
         # Review only checkbox
         self._review_cb = QCheckBox("Review only")
@@ -498,8 +484,9 @@ class MainWindow(QMainWindow):
         lo.addWidget(self._show_orphans_cb)
 
         # Clear button
-        clear_btn = QPushButton("Clear filters")
+        clear_btn = QPushButton("Clear")
         clear_btn.setFixedHeight(28)
+        clear_btn.setToolTip("Reset all filters to defaults")
         clear_btn.clicked.connect(self._clear_filters)
         lo.addWidget(clear_btn)
 
@@ -552,7 +539,7 @@ class MainWindow(QMainWindow):
         t.setColumnWidth(COL_FBR_QUALITY,   88)
         t.setColumnWidth(COL_FBR_BEST,      76)
         t.setColumnWidth(COL_FBR_DATE,      86)
-        t.setColumnWidth(COL_ACTIONS,      200)
+        t.setColumnWidth(COL_ACTIONS,      240)
 
         t.doubleClicked.connect(self._on_row_double_clicked)
         self._table = t
@@ -922,8 +909,9 @@ class MainWindow(QMainWindow):
             Qt.ItemDataRole.UserRole, ("account", acc.id)
         )
 
-        open_btn = QPushButton("Open Folder")
+        open_btn = QPushButton("Folder")
         open_btn.setFixedHeight(28)
+        open_btn.setFixedWidth(60)
         open_btn.setEnabled(not removed)
         open_btn.setToolTip("Open this account's folder in Windows Explorer")
         open_btn.clicked.connect(
@@ -932,6 +920,7 @@ class MainWindow(QMainWindow):
 
         src_btn = QPushButton("Sources")
         src_btn.setFixedHeight(28)
+        src_btn.setFixedWidth(70)
         has_sources = acc.data_db_exists or acc.sources_txt_exists
         src_btn.setEnabled(has_sources)
         src_btn.setToolTip(
@@ -980,8 +969,9 @@ class MainWindow(QMainWindow):
             Qt.ItemDataRole.UserRole, ("orphan", disc)
         )
 
-        open_btn = QPushButton("Open Folder")
+        open_btn = QPushButton("Folder")
         open_btn.setFixedHeight(28)
+        open_btn.setFixedWidth(60)
         open_btn.setToolTip("Open orphan folder in Windows Explorer")
         open_btn.clicked.connect(
             lambda _, d=disc: self._open_account_folder(d.device_id, d.username)
@@ -989,6 +979,7 @@ class MainWindow(QMainWindow):
 
         src_btn = QPushButton("Sources")
         src_btn.setFixedHeight(28)
+        src_btn.setFixedWidth(70)
         has_sources = disc.data_db_exists or disc.sources_txt_exists
         src_btn.setEnabled(has_sources)
         src_btn.setToolTip(
@@ -1111,9 +1102,10 @@ class MainWindow(QMainWindow):
         wrapper = QWidget()
         lo = QHBoxLayout(wrapper)
         lo.setContentsMargins(4, 3, 4, 3)
-        lo.setSpacing(6)
+        lo.setSpacing(4)
         for btn in btns:
             lo.addWidget(btn)
+        lo.addStretch()
         return wrapper
 
     def _update_last_sync_label(self) -> None:
