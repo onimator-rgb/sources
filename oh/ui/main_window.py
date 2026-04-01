@@ -554,7 +554,7 @@ class MainWindow(QMainWindow):
         t.setColumnWidth(COL_FBR_QUALITY,   88)
         t.setColumnWidth(COL_FBR_BEST,      76)
         t.setColumnWidth(COL_FBR_DATE,      86)
-        t.setColumnWidth(COL_ACTIONS,      100)
+        t.setColumnWidth(COL_ACTIONS,       80)
 
         t.doubleClicked.connect(self._on_row_double_clicked)
         self._table = t
@@ -925,12 +925,12 @@ class MainWindow(QMainWindow):
         )
 
         act_btn = QPushButton("Actions \u25BE")
-        act_btn.setFixedHeight(28)
+        act_btn.setStyleSheet("min-height: 0px; padding: 2px 8px; font-size: 11px;")
         act_btn.setEnabled(not removed)
         act_btn.setToolTip("Open folder, view sources, operator actions")
         act_btn.clicked.connect(lambda _, a=acc, b=act_btn: self._show_action_menu(a, b))
 
-        self._table.setCellWidget(row, COL_ACTIONS, self._wrap_action_btn(act_btn))
+        self._table.setCellWidget(row, COL_ACTIONS, act_btn)
 
     def _fill_orphan_row(self, row: int, disc: DiscoveredAccount) -> None:
         center = Qt.AlignmentFlag.AlignCenter
@@ -961,11 +961,11 @@ class MainWindow(QMainWindow):
         )
 
         act_btn = QPushButton("Actions \u25BE")
-        act_btn.setFixedHeight(28)
+        act_btn.setStyleSheet("min-height: 0px; padding: 2px 8px; font-size: 11px;")
         act_btn.setToolTip("Open folder, view sources")
         act_btn.clicked.connect(lambda _, d=disc, b=act_btn: self._show_orphan_action_menu(d, b))
 
-        self._table.setCellWidget(row, COL_ACTIONS, self._wrap_action_btn(act_btn))
+        self._table.setCellWidget(row, COL_ACTIONS, act_btn)
 
     def _fill_fbr_cells(
         self,
@@ -1072,14 +1072,8 @@ class MainWindow(QMainWindow):
         return i
 
     @staticmethod
-    def _wrap_action_btn(btn: QPushButton) -> QWidget:
-        wrapper = QWidget()
-        lo = QHBoxLayout(wrapper)
-        lo.setContentsMargins(4, 3, 4, 3)
-        lo.setSpacing(0)
-        lo.addWidget(btn)
-        lo.addStretch()
-        return wrapper
+    # _wrap_action_btn removed — buttons are set directly as cell widgets
+    # to avoid wrapper margins causing inter-row overlap.
 
     def _update_last_sync_label(self) -> None:
         run = self._sync_repo.get_latest_run()
