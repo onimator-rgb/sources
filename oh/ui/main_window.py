@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLineEdit, QLabel, QFileDialog, QStatusBar,
     QCheckBox, QComboBox, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QFrame, QMessageBox, QMenu, QInputDialog,
+    QAbstractItemView, QFrame, QMessageBox, QMenu, QInputDialog, QSizePolicy,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPixmap
@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
         self._op_tags_map: dict[int, str] = {}  # account_id → "TB3 | limits 2"
 
         self.setWindowTitle("OH — Operational Hub")
-        self.setMinimumSize(1400, 720)
+        self.setMinimumSize(1100, 650)
 
         self._sources_tab  = SourcesTab(global_sources_service, source_delete_service)
         self._settings_tab = SettingsTab(self._settings)
@@ -335,15 +335,19 @@ class MainWindow(QMainWindow):
         lo.setContentsMargins(0, 4, 0, 4)
         lo.setSpacing(6)
 
-        self._scan_btn = QPushButton("⟳  Scan & Sync")
+        _btn_policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+        self._scan_btn = QPushButton("Scan && Sync")
         self._scan_btn.setFixedHeight(34)
+        self._scan_btn.setSizePolicy(_btn_policy)
         self._scan_btn.setToolTip(
             "Discover accounts from the Onimator folder and sync with the OH registry"
         )
         self._scan_btn.clicked.connect(self._on_scan_and_sync)
 
-        self._fbr_btn = QPushButton("◈  Analyze FBR")
+        self._fbr_btn = QPushButton("Analyze FBR")
         self._fbr_btn.setFixedHeight(34)
+        self._fbr_btn.setSizePolicy(_btn_policy)
         self._fbr_btn.setToolTip(
             "Run FBR analysis for all active accounts that have data.db\n"
             "and save results to the OH database"
@@ -352,11 +356,13 @@ class MainWindow(QMainWindow):
 
         refresh_btn = QPushButton("Refresh")
         refresh_btn.setFixedHeight(34)
+        refresh_btn.setSizePolicy(_btn_policy)
         refresh_btn.setToolTip("Reload the account list from the OH database (no scan)")
         refresh_btn.clicked.connect(self._refresh_table)
 
-        self._report_btn = QPushButton("Session Report")
+        self._report_btn = QPushButton("Session")
         self._report_btn.setFixedHeight(34)
+        self._report_btn.setSizePolicy(_btn_policy)
         self._report_btn.setToolTip("Open session report for today")
         self._report_btn.clicked.connect(self._on_session_report)
 
@@ -371,16 +377,19 @@ class MainWindow(QMainWindow):
 
         self._cockpit_btn = QPushButton("Cockpit")
         self._cockpit_btn.setFixedHeight(34)
+        self._cockpit_btn.setSizePolicy(_btn_policy)
         self._cockpit_btn.setToolTip("Daily operations overview")
         self._cockpit_btn.clicked.connect(self._on_cockpit)
 
         self._history_btn = QPushButton("History")
         self._history_btn.setFixedHeight(34)
+        self._history_btn.setSizePolicy(_btn_policy)
         self._history_btn.setToolTip("Show recent operator actions")
         self._history_btn.clicked.connect(self._on_action_history)
 
         self._recs_btn = QPushButton("Recs")
         self._recs_btn.setFixedHeight(34)
+        self._recs_btn.setSizePolicy(_btn_policy)
         self._recs_btn.setToolTip("Generate and view operational recommendations")
         self._recs_btn.clicked.connect(self._on_recommendations)
 
@@ -410,7 +419,8 @@ class MainWindow(QMainWindow):
             _STATUS_FILTER_REMOVED,
             _STATUS_FILTER_ALL,
         ])
-        self._status_filter.setFixedWidth(110)
+        self._status_filter.setMinimumWidth(80)
+        self._status_filter.setMaximumWidth(130)
         self._status_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._status_filter)
 
@@ -425,7 +435,8 @@ class MainWindow(QMainWindow):
             _FBR_FILTER_NO_QUALITY,
             _FBR_FILTER_HAS_QUALITY,
         ])
-        self._fbr_filter.setFixedWidth(150)
+        self._fbr_filter.setMinimumWidth(100)
+        self._fbr_filter.setMaximumWidth(170)
         self._fbr_filter.setToolTip(
             "Needs attention = never analyzed or zero quality sources"
         )
@@ -435,7 +446,8 @@ class MainWindow(QMainWindow):
         # Device filter
         lo.addWidget(QLabel("Device:"))
         self._device_filter = QComboBox()
-        self._device_filter.setFixedWidth(130)
+        self._device_filter.setMinimumWidth(80)
+        self._device_filter.setMaximumWidth(150)
         self._device_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._device_filter)
 
@@ -443,7 +455,8 @@ class MainWindow(QMainWindow):
         lo.addWidget(QLabel("Search:"))
         self._search_box = QLineEdit()
         self._search_box.setPlaceholderText("username or device…")
-        self._search_box.setFixedWidth(200)
+        self._search_box.setMinimumWidth(100)
+        self._search_box.setMaximumWidth(250)
         self._search_box.textChanged.connect(self._apply_filter)
         lo.addWidget(self._search_box)
 
@@ -455,7 +468,8 @@ class MainWindow(QMainWindow):
             _TAGS_FILTER_SLAVE, _TAGS_FILTER_START, _TAGS_FILTER_PK,
             _TAGS_FILTER_CUSTOM,
         ])
-        self._tags_filter.setFixedWidth(90)
+        self._tags_filter.setMinimumWidth(70)
+        self._tags_filter.setMaximumWidth(110)
         self._tags_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._tags_filter)
 
@@ -465,7 +479,8 @@ class MainWindow(QMainWindow):
         self._activity_filter.addItems([
             _ACTIVITY_FILTER_ALL, _ACTIVITY_FILTER_ZERO, _ACTIVITY_FILTER_HAS,
         ])
-        self._activity_filter.setFixedWidth(120)
+        self._activity_filter.setMinimumWidth(80)
+        self._activity_filter.setMaximumWidth(140)
         self._activity_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._activity_filter)
 
@@ -539,7 +554,7 @@ class MainWindow(QMainWindow):
         t.setColumnWidth(COL_FBR_QUALITY,   88)
         t.setColumnWidth(COL_FBR_BEST,      76)
         t.setColumnWidth(COL_FBR_DATE,      86)
-        t.setColumnWidth(COL_ACTIONS,      240)
+        t.setColumnWidth(COL_ACTIONS,      100)
 
         t.doubleClicked.connect(self._on_row_double_clicked)
         self._table = t
@@ -909,37 +924,13 @@ class MainWindow(QMainWindow):
             Qt.ItemDataRole.UserRole, ("account", acc.id)
         )
 
-        open_btn = QPushButton("Folder")
-        open_btn.setFixedHeight(28)
-        open_btn.setFixedWidth(60)
-        open_btn.setEnabled(not removed)
-        open_btn.setToolTip("Open this account's folder in Windows Explorer")
-        open_btn.clicked.connect(
-            lambda _, a=acc: self._open_account_folder(a.device_id, a.username)
-        )
-
-        src_btn = QPushButton("Sources")
-        src_btn.setFixedHeight(28)
-        src_btn.setFixedWidth(70)
-        has_sources = acc.data_db_exists or acc.sources_txt_exists
-        src_btn.setEnabled(has_sources)
-        src_btn.setToolTip(
-            "Inspect sources and FBR analytics for this account"
-            if has_sources else
-            "No source files found for this account"
-        )
-        src_btn.clicked.connect(
-            lambda _, a=acc: self._on_view_sources(a.device_id, a.username, a.id)
-        )
-
-        act_btn = QPushButton("\u2026")  # "…"
+        act_btn = QPushButton("Actions \u25BE")
         act_btn.setFixedHeight(28)
-        act_btn.setFixedWidth(32)
-        act_btn.setEnabled(not removed and self._operator_action_service is not None)
-        act_btn.setToolTip("Operator actions")
+        act_btn.setEnabled(not removed)
+        act_btn.setToolTip("Open folder, view sources, operator actions")
         act_btn.clicked.connect(lambda _, a=acc, b=act_btn: self._show_action_menu(a, b))
 
-        self._table.setCellWidget(row, COL_ACTIONS, self._wrap_btns(open_btn, src_btn, act_btn))
+        self._table.setCellWidget(row, COL_ACTIONS, self._wrap_action_btn(act_btn))
 
     def _fill_orphan_row(self, row: int, disc: DiscoveredAccount) -> None:
         center = Qt.AlignmentFlag.AlignCenter
@@ -969,29 +960,12 @@ class MainWindow(QMainWindow):
             Qt.ItemDataRole.UserRole, ("orphan", disc)
         )
 
-        open_btn = QPushButton("Folder")
-        open_btn.setFixedHeight(28)
-        open_btn.setFixedWidth(60)
-        open_btn.setToolTip("Open orphan folder in Windows Explorer")
-        open_btn.clicked.connect(
-            lambda _, d=disc: self._open_account_folder(d.device_id, d.username)
-        )
+        act_btn = QPushButton("Actions \u25BE")
+        act_btn.setFixedHeight(28)
+        act_btn.setToolTip("Open folder, view sources")
+        act_btn.clicked.connect(lambda _, d=disc, b=act_btn: self._show_orphan_action_menu(d, b))
 
-        src_btn = QPushButton("Sources")
-        src_btn.setFixedHeight(28)
-        src_btn.setFixedWidth(70)
-        has_sources = disc.data_db_exists or disc.sources_txt_exists
-        src_btn.setEnabled(has_sources)
-        src_btn.setToolTip(
-            "Inspect source list for this orphan folder"
-            if has_sources else
-            "No source files found in this orphan folder"
-        )
-        src_btn.clicked.connect(
-            lambda _, d=disc: self._on_view_sources(d.device_id, d.username, None)
-        )
-
-        self._table.setCellWidget(row, COL_ACTIONS, self._wrap_btns(open_btn, src_btn))
+        self._table.setCellWidget(row, COL_ACTIONS, self._wrap_action_btn(act_btn))
 
     def _fill_fbr_cells(
         self,
@@ -1098,13 +1072,12 @@ class MainWindow(QMainWindow):
         return i
 
     @staticmethod
-    def _wrap_btns(*btns: QPushButton) -> QWidget:
+    def _wrap_action_btn(btn: QPushButton) -> QWidget:
         wrapper = QWidget()
         lo = QHBoxLayout(wrapper)
         lo.setContentsMargins(4, 3, 4, 3)
-        lo.setSpacing(4)
-        for btn in btns:
-            lo.addWidget(btn)
+        lo.setSpacing(0)
+        lo.addWidget(btn)
         lo.addStretch()
         return wrapper
 
@@ -1613,25 +1586,44 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _show_action_menu(self, acc: AccountRecord, btn: QPushButton) -> None:
-        """Show a popup menu of operator actions for this account."""
-        svc = self._operator_action_service
-        if not svc:
-            return
-
+        """Show a popup menu of all actions for this account."""
         menu = QMenu(self)
 
-        if acc.review_flag:
-            menu.addAction("Clear Review", lambda: self._do_clear_review(acc))
-        else:
-            menu.addAction("Set Review", lambda: self._do_set_review(acc))
+        menu.addAction("Open Folder", lambda: self._open_account_folder(acc.device_id, acc.username))
 
-        menu.addSeparator()
-        menu.addAction("TB +1", lambda: self._do_tb_increment(acc))
-        menu.addAction("Limits +1", lambda: self._do_limits_increment(acc))
+        has_sources = acc.data_db_exists or acc.sources_txt_exists
+        src_action = menu.addAction(
+            "View Sources",
+            lambda: self._on_view_sources(acc.device_id, acc.username, acc.id),
+        )
+        src_action.setEnabled(has_sources)
 
         if self._source_finder_service is not None:
-            menu.addSeparator()
             menu.addAction("Find Sources", lambda: self._on_find_sources(acc))
+
+        svc = self._operator_action_service
+        if svc:
+            menu.addSeparator()
+            if acc.review_flag:
+                menu.addAction("Clear Review", lambda: self._do_clear_review(acc))
+            else:
+                menu.addAction("Set Review", lambda: self._do_set_review(acc))
+            menu.addAction("TB +1", lambda: self._do_tb_increment(acc))
+            menu.addAction("Limits +1", lambda: self._do_limits_increment(acc))
+
+        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _show_orphan_action_menu(self, disc: DiscoveredAccount, btn: QPushButton) -> None:
+        """Show a popup menu for an orphan row."""
+        menu = QMenu(self)
+        menu.addAction("Open Folder", lambda: self._open_account_folder(disc.device_id, disc.username))
+
+        has_sources = disc.data_db_exists or disc.sources_txt_exists
+        src_action = menu.addAction(
+            "View Sources",
+            lambda: self._on_view_sources(disc.device_id, disc.username, None),
+        )
+        src_action.setEnabled(has_sources)
 
         menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
