@@ -1071,10 +1071,6 @@ class MainWindow(QMainWindow):
         i.setForeground(col)
         return i
 
-    @staticmethod
-    # _wrap_action_btn removed — buttons are set directly as cell widgets
-    # to avoid wrapper margins causing inter-row overlap.
-
     def _update_last_sync_label(self) -> None:
         run = self._sync_repo.get_latest_run()
         if run:
