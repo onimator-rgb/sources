@@ -28,9 +28,10 @@ from PySide6.QtWidgets import (
     QPushButton, QLineEdit, QLabel, QFileDialog, QStatusBar,
     QCheckBox, QComboBox, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QFrame, QMessageBox, QMenu, QInputDialog, QSizePolicy,
+    QSplitter, QApplication,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QPixmap, QKeyEvent
 
 from datetime import date
 
@@ -53,6 +54,7 @@ from oh.services.operator_action_service import OperatorActionService
 from oh.services.recommendation_service import RecommendationService
 from oh.services.source_delete_service import SourceDeleteService
 from oh.resources import asset_path, asset_exists
+from oh.ui.account_detail_panel import AccountDetailPanel
 from oh.ui.settings_tab import SettingsTab
 from oh.ui.source_dialog import SourceDialog
 from oh.ui.sources_tab import SourcesTab
@@ -177,8 +179,10 @@ class MainWindow(QMainWindow):
         tag_repo=None,
         recommendation_service: Optional[RecommendationService] = None,
         source_finder_service=None,
+        account_detail_service=None,
     ) -> None:
         super().__init__()
+        self._account_detail_service  = account_detail_service
         self._scan_service            = scan_service
         self._fbr_service             = fbr_service
         self._global_sources_service  = global_sources_service
@@ -202,6 +206,9 @@ class MainWindow(QMainWindow):
         self._session_map: dict[int, AccountSessionRecord] = {}
         self._device_status_map: dict[str, str] = {}  # device_id → last_known_status
         self._op_tags_map: dict[int, str] = {}  # account_id → "TB3 | limits 2"
+
+        # Debounce timer for arrow-key navigation in the detail drawer
+        self._detail_debounce_timer: Optional[QTimer] = None
 
         self.setWindowTitle("OH — Operational Hub")
         self.setMinimumSize(1100, 650)
@@ -239,15 +246,44 @@ class MainWindow(QMainWindow):
         self._set_status("Ready.")
 
     def _make_accounts_page(self) -> QWidget:
-        """Wrap the existing toolbar + filter bar + table into the Accounts tab."""
-        w = QWidget()
-        lo = QVBoxLayout(w)
-        lo.setContentsMargins(0, 6, 0, 0)
-        lo.setSpacing(6)
-        lo.addWidget(self._make_toolbar())
-        lo.addWidget(self._make_filter_bar())
-        lo.addWidget(self._make_table(), stretch=1)
-        return w
+        """Wrap the existing toolbar + filter bar + table into the Accounts tab.
+
+        The table area is placed inside a QSplitter (horizontal) so that the
+        AccountDetailPanel can be shown/hidden on the right side.
+        """
+        page = QWidget()
+        page_lo = QVBoxLayout(page)
+        page_lo.setContentsMargins(0, 6, 0, 0)
+        page_lo.setSpacing(6)
+        page_lo.addWidget(self._make_toolbar())
+        page_lo.addWidget(self._make_filter_bar())
+
+        # Build splitter: left = table, right = detail panel (hidden initially)
+        self._accounts_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        table_widget = self._make_table()
+        self._accounts_splitter.addWidget(table_widget)
+
+        self._detail_panel = AccountDetailPanel(service=self._account_detail_service)
+        self._detail_panel.setVisible(False)
+        self._detail_panel.close_requested.connect(self._close_detail_panel)
+        self._detail_panel.action_requested.connect(self._on_detail_action_requested)
+        self._accounts_splitter.addWidget(self._detail_panel)
+
+        # Give the table most of the space; panel gets the rest
+        self._accounts_splitter.setStretchFactor(0, 3)
+        self._accounts_splitter.setStretchFactor(1, 1)
+
+        # Connect single-click to open detail panel
+        self._table.clicked.connect(self._on_account_selected)
+
+        # Connect selection model for debounced drawer updates on arrow keys
+        self._table.selectionModel().currentRowChanged.connect(
+            self._on_table_row_changed
+        )
+
+        page_lo.addWidget(self._accounts_splitter, stretch=1)
+        return page
 
     def _on_tab_changed(self, index: int) -> None:
         if index == 1:  # Sources tab
@@ -597,6 +633,12 @@ class MainWindow(QMainWindow):
         if selected_id is not None:
             self._select_account_by_id(selected_id)
 
+        # Reload detail panel if it is currently open
+        if (hasattr(self, '_detail_panel')
+                and self._detail_panel.isVisible()
+                and self._detail_panel.current_account_id() is not None):
+            self._load_detail_for_account(self._detail_panel.current_account_id())
+
     def _get_selected_account_id(self) -> int:
         """Return the account_id of the currently selected row, or None."""
         selected = self._table.selectionModel().selectedRows()
@@ -619,6 +661,253 @@ class MainWindow(QMainWindow):
                     self._table.selectRow(row)
                     self._table.scrollToItem(item)
                     return
+
+    # ------------------------------------------------------------------
+    # Detail panel — selection, loading, closing
+    # ------------------------------------------------------------------
+
+    def _on_account_selected(self, index) -> None:
+        """Handle single-click on a table row: open detail panel for the account."""
+        row = index.row()
+        item = self._table.item(row, COL_USERNAME)
+        if not item:
+            return
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        kind, payload = data
+        if kind != "account":
+            return
+        account_id = payload
+        if account_id is None:
+            return
+        self._load_detail_for_account(account_id)
+        if not self._detail_panel.isVisible():
+            self._detail_panel.setVisible(True)
+
+    def _load_detail_for_account(self, account_id: int) -> None:
+        """Fetch account data and populate the detail panel."""
+        acc = self._accounts.get_by_id(account_id)
+        if acc is None:
+            self._detail_panel.clear()
+            return
+
+        if self._account_detail_service is not None:
+            try:
+                detail_data = self._account_detail_service.get_summary_data(
+                    account=acc,
+                    fbr_map=self._fbr_map,
+                    source_count_map=self._source_count_map,
+                    session_map=self._session_map,
+                    device_status_map=self._device_status_map,
+                    op_tags_map=self._op_tags_map,
+                )
+                self._detail_panel.load_account(detail_data)
+                return
+            except Exception:
+                logger.debug(
+                    "account_detail_service.get_summary_data failed for %s, "
+                    "falling back to minimal data",
+                    account_id,
+                    exc_info=True,
+                )
+
+        # Fallback: build a minimal data object from the AccountRecord
+        # so the panel can still render header information.
+        from types import SimpleNamespace
+        dev_status = self._device_status_map.get(acc.device_id)
+        fallback = SimpleNamespace(
+            account_id=acc.id,
+            username=acc.username,
+            device_name=acc.device_name or acc.device_id,
+            device_status=dev_status,
+            is_active=acc.is_active,
+            review_flag=acc.review_flag,
+            review_note=acc.review_note,
+        )
+        self._detail_panel.load_account(fallback)
+
+    def _close_detail_panel(self) -> None:
+        """Hide the detail panel and give full width back to the table."""
+        self._detail_panel.setVisible(False)
+        self._detail_panel.clear()
+
+    # ------------------------------------------------------------------
+    # Debounced row-change handler (arrow-key navigation)
+    # ------------------------------------------------------------------
+
+    def _on_table_row_changed(self, current, previous) -> None:
+        """Called when the table selection changes (arrow keys or click).
+
+        If the drawer is open, start/restart a 150ms debounce timer so that
+        rapid arrow-key navigation does not trigger a load for every row.
+        """
+        if not self._detail_panel.isVisible():
+            return
+
+        if self._detail_debounce_timer is not None:
+            self._detail_debounce_timer.stop()
+            self._detail_debounce_timer.deleteLater()
+
+        self._detail_debounce_timer = QTimer(self)
+        self._detail_debounce_timer.setSingleShot(True)
+        self._detail_debounce_timer.setInterval(150)
+        self._detail_debounce_timer.timeout.connect(
+            lambda: self._debounced_load_row(current.row())
+        )
+        self._detail_debounce_timer.start()
+
+    def _debounced_load_row(self, row: int) -> None:
+        """Load the detail panel for the given table row after debounce."""
+        item = self._table.item(row, COL_USERNAME)
+        if not item:
+            return
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        kind, payload = data
+        if kind != "account":
+            return
+        account_id = payload
+        if account_id is None:
+            return
+        self._load_detail_for_account(account_id)
+
+    # ------------------------------------------------------------------
+    # Keyboard shortcuts
+    # ------------------------------------------------------------------
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Handle keyboard shortcuts for the detail drawer.
+
+        Space  -- toggle drawer for selected row (only when table has focus)
+        Escape -- close drawer if open
+        Left/Right arrows -- switch drawer tabs (only when table has focus
+                             and drawer is visible)
+        """
+        # Determine if the focus is on an input widget that should consume keys
+        focus = QApplication.focusWidget()
+        focus_is_input = isinstance(focus, (QLineEdit, QComboBox, QInputDialog))
+
+        key = event.key()
+
+        # Escape: close drawer regardless of focus
+        if key == Qt.Key.Key_Escape:
+            if self._detail_panel.isVisible():
+                self._close_detail_panel()
+                return
+            # Let parent handle Escape if drawer is not open
+            super().keyPressEvent(event)
+            return
+
+        # The following shortcuts only apply when focus is NOT on an input
+        if focus_is_input:
+            super().keyPressEvent(event)
+            return
+
+        # Space: toggle drawer open/close for selected row
+        if key == Qt.Key.Key_Space:
+            if self._detail_panel.isVisible():
+                self._close_detail_panel()
+            else:
+                # Try to open for the currently selected row
+                current = self._table.currentIndex()
+                if current.isValid():
+                    self._on_account_selected(current)
+            return
+
+        # Left/Right arrows: switch drawer tabs when drawer is visible
+        if self._detail_panel.isVisible():
+            if key == Qt.Key.Key_Left:
+                self._detail_panel.switch_tab(-1)
+                return
+            elif key == Qt.Key.Key_Right:
+                self._detail_panel.switch_tab(1)
+                return
+
+        super().keyPressEvent(event)
+
+    def _on_detail_action_requested(self, action_type: str, account_id: int) -> None:
+        """Dispatch action requests from the detail panel to existing handlers."""
+        acc = self._accounts.get_by_id(account_id)
+        if acc is None:
+            return
+
+        if action_type == "set_review":
+            self._do_set_review(acc)
+        elif action_type == "clear_review":
+            self._do_clear_review(acc)
+        elif action_type == "tb_plus_1":
+            self._do_tb_increment(acc)
+        elif action_type == "limits_plus_1":
+            self._do_limits_increment(acc)
+        elif action_type == "open_folder":
+            self._open_account_folder(acc.device_id, acc.username)
+        elif action_type == "copy_diagnostic":
+            self._copy_diagnostic(acc)
+        else:
+            logger.warning("Unknown detail panel action: %s", action_type)
+            return
+
+        # After any action completes, refresh the table and reload the drawer
+        # for the same account so the panel reflects the new state.
+        # Note: _do_set_review etc. already call _refresh_table(), but we
+        # still need to reload the drawer.  Guard against open_folder/copy
+        # which don't mutate state.
+        if action_type not in ("open_folder", "copy_diagnostic"):
+            self._load_detail_for_account(account_id)
+
+    def _copy_diagnostic(self, acc) -> None:
+        """Copy a diagnostic summary for the account to the clipboard."""
+        # Try the rich format from the service first
+        if self._account_detail_service is not None:
+            try:
+                detail_data = self._account_detail_service.get_summary_data(
+                    account=acc,
+                    fbr_map=self._fbr_map,
+                    source_count_map=self._source_count_map,
+                    session_map=self._session_map,
+                    device_status_map=self._device_status_map,
+                    op_tags_map=self._op_tags_map,
+                )
+                text = self._account_detail_service.format_diagnostic(detail_data)
+                QApplication.clipboard().setText(text)
+                logger.info("Diagnostic copied (rich) for %s", acc.username)
+                return
+            except Exception:
+                logger.debug(
+                    "format_diagnostic via service failed, using fallback",
+                    exc_info=True,
+                )
+
+        # Fallback: simple text summary
+        snap = self._fbr_map.get(acc.id) if acc.id is not None else None
+        src_count = self._source_count_map.get(acc.id, 0) if acc.id is not None else 0
+        sess = self._session_map.get(acc.id) if acc.id is not None else None
+        dev_status = self._device_status_map.get(acc.device_id, "unknown")
+
+        lines = [
+            "Account: %s" % acc.username,
+            "Device: %s (%s)" % (acc.device_name or acc.device_id, dev_status),
+            "Status: %s" % ("Active" if acc.is_active else "Removed"),
+            "Follow: %s  Unfollow: %s  Limit: %s" % (
+                acc.follow_enabled, acc.unfollow_enabled, acc.limit_per_day or "-"),
+            "Active sources: %s" % src_count,
+        ]
+        if snap:
+            lines.append("FBR: %s/%s quality  best=%.1f%%  date=%s" % (
+                snap.quality_sources, snap.total_sources,
+                snap.best_fbr_pct if snap.best_fbr_pct is not None else 0,
+                (snap.analyzed_at[:10] if snap.analyzed_at else "-"),
+            ))
+        if sess:
+            lines.append("Today: follow=%s  like=%s" % (sess.follow_count, sess.like_count))
+        if acc.review_flag:
+            lines.append("Review: %s" % (acc.review_note or "(no note)"))
+
+        clipboard = QApplication.clipboard()
+        clipboard.setText("\n".join(lines))
+        logger.info("Diagnostic copied for %s", acc.username)
 
     def _refresh_source_counts(self) -> None:
         """Called by SourcesTab (via parent-chain walk) after a delete operation."""

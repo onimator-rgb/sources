@@ -36,6 +36,10 @@ from oh.services.scan_service import ScanService
 from oh.services.session_service import SessionService
 from oh.services.source_delete_service import SourceDeleteService
 from oh.services.source_finder_service import SourceFinderService
+try:
+    from oh.services.account_detail_service import AccountDetailService
+except ImportError:
+    AccountDetailService = None
 from oh.resources import asset_path, asset_exists
 from oh.ui.main_window import MainWindow
 from oh.ui.style import get_stylesheet, apply_palette, set_current_theme
@@ -243,6 +247,17 @@ def main() -> None:
         settings_repo=settings_repo,
     )
 
+    account_detail_service = None
+    if AccountDetailService is not None:
+        try:
+            account_detail_service = AccountDetailService(
+                operator_action_repo=operator_action_repo,
+                settings_repo=settings_repo,
+            )
+            logger.info("AccountDetailService initialised.")
+        except Exception:
+            logger.warning("AccountDetailService failed to initialise.", exc_info=True)
+
     window = MainWindow(
         conn,
         scan_service,
@@ -255,6 +270,7 @@ def main() -> None:
         tag_repo=tag_repo,
         recommendation_service=recommendation_service,
         source_finder_service=source_finder_service,
+        account_detail_service=account_detail_service,
     )
     window.show()
 
