@@ -49,6 +49,9 @@ a = Analysis(
         "PySide6.QtCore",
         "PySide6.QtGui",
         "PySide6.QtWidgets",
+        # Source Finder dependencies
+        "requests",
+        "google.generativeai",
     ],
     hookspath=[],
     hooksconfig={},
