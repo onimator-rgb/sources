@@ -117,6 +117,21 @@ class SessionRepository:
         ).fetchall()
         return {row["account_id"]: self._from_row(row) for row in rows}
 
+    def get_recent_for_account(
+        self, account_id: int, days: int = 14
+    ) -> list:
+        """Return session snapshots for last N days for one account."""
+        rows = self._conn.execute(
+            """
+            SELECT * FROM session_snapshots
+            WHERE account_id = ?
+            ORDER BY snapshot_date DESC
+            LIMIT ?
+            """,
+            (account_id, days),
+        ).fetchall()
+        return [self._from_row(r) for r in rows]
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

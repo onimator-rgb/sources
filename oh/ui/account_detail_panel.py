@@ -37,6 +37,8 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from oh.ui.style import sc
 from oh.ui.account_summary_tab import AccountSummaryTab
 from oh.ui.account_alerts_tab import AccountAlertsTab
+from oh.ui.account_sources_tab import AccountSourcesTab
+from oh.ui.account_history_tab import AccountHistoryTab
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +107,10 @@ class AccountDetailPanel(QWidget):
         self._review_badge.setText("")
         self._review_badge.setVisible(False)
         self._set_review_btn.setText("Set Review")
+        self._sources_tab.clear()
+        self._history_tab.clear()
+        self._related_frame.setVisible(False)
+        self._related_list.setText("")
 
     def current_account_id(self) -> Optional[int]:
         return self._current_account_id
@@ -133,6 +139,7 @@ class AccountDetailPanel(QWidget):
         root.addWidget(sep)
 
         root.addWidget(self._make_tabs(), stretch=1)
+        root.addWidget(self._make_related_accounts())
         root.addWidget(self._make_footer())
 
     # -- Header --------------------------------------------------------
@@ -141,7 +148,7 @@ class AccountDetailPanel(QWidget):
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
         lo = QVBoxLayout(frame)
-        lo.setContentsMargins(8, 6, 8, 6)
+        lo.setContentsMargins(8, 8, 8, 8)
         lo.setSpacing(4)
 
         # Row 1: username + close button
@@ -178,6 +185,7 @@ class AccountDetailPanel(QWidget):
         badge_row.addWidget(self._status_badge)
 
         self._review_badge = QLabel("")
+        self._review_badge.setWordWrap(True)
         self._review_badge.setVisible(False)
         badge_row.addWidget(self._review_badge)
 
@@ -199,16 +207,66 @@ class AccountDetailPanel(QWidget):
         # Bubble up action_requested from alerts tab to panel signal
         self._alerts_tab.action_requested.connect(self.action_requested.emit)
 
+        self._sources_tab = AccountSourcesTab()
+        self._history_tab = AccountHistoryTab()
+
         self._tab_widget.addTab(self._summary_tab, "Summary")
         self._tab_widget.addTab(self._alerts_tab, "Alerts")
+        self._tab_widget.addTab(self._sources_tab, "Sources")
+        self._tab_widget.addTab(self._history_tab, "History")
 
         return self._tab_widget
+
+    # -- Related Accounts ----------------------------------------------
+
+    def _make_related_accounts(self) -> QFrame:
+        self._related_frame = QFrame()
+        related_lo = QVBoxLayout(self._related_frame)
+        related_lo.setContentsMargins(8, 4, 8, 4)
+        related_lo.setSpacing(2)
+
+        self._related_header = QLabel("Related Accounts")
+        self._related_header.setStyleSheet(
+            "font-size: 11px; font-weight: bold; color: %s;" % sc("heading").name()
+        )
+        related_lo.addWidget(self._related_header)
+
+        self._related_list = QLabel("")
+        self._related_list.setWordWrap(True)
+        self._related_list.setStyleSheet(
+            "font-size: 11px; color: %s;" % sc("text_secondary").name()
+        )
+        related_lo.addWidget(self._related_list)
+
+        self._related_frame.setVisible(False)
+        return self._related_frame
+
+    def load_related_accounts(self, accounts: list) -> None:
+        """Show other accounts on the same device.
+
+        accounts: list of dicts with 'username', 'health_score' keys.
+        """
+        if not accounts:
+            self._related_frame.setVisible(False)
+            return
+
+        lines = []
+        for acc in accounts[:8]:  # max 8
+            score = acc.get("health_score", 0)
+            lines.append("@%s (%.0f)" % (acc["username"], score))
+
+        self._related_header.setText(
+            "Related Accounts (%d on same device)" % len(accounts)
+        )
+        self._related_list.setText("  |  ".join(lines))
+        self._related_frame.setVisible(True)
 
     # -- Footer --------------------------------------------------------
 
     def _make_footer(self) -> QWidget:
         w = QWidget()
-        lo = QHBoxLayout(w)
+        from PySide6.QtWidgets import QGridLayout
+        lo = QGridLayout(w)
         lo.setContentsMargins(0, 4, 0, 0)
         lo.setSpacing(4)
 
@@ -217,29 +275,39 @@ class AccountDetailPanel(QWidget):
         self._set_review_btn = QPushButton("Set Review")
         self._set_review_btn.setStyleSheet(btn_style)
         self._set_review_btn.clicked.connect(self._on_review_clicked)
-        lo.addWidget(self._set_review_btn)
 
         tb_btn = QPushButton("TB +1")
         tb_btn.setStyleSheet(btn_style)
         tb_btn.clicked.connect(self._on_tb_clicked)
-        lo.addWidget(tb_btn)
 
         limits_btn = QPushButton("Limits +1")
         limits_btn.setStyleSheet(btn_style)
         limits_btn.clicked.connect(self._on_limits_clicked)
-        lo.addWidget(limits_btn)
 
         open_btn = QPushButton("Open Folder")
         open_btn.setStyleSheet(btn_style)
         open_btn.clicked.connect(self._on_open_folder_clicked)
-        lo.addWidget(open_btn)
 
         self._copy_btn = QPushButton("Copy Diagnostic")
         self._copy_btn.setStyleSheet(btn_style)
         self._copy_btn.clicked.connect(self._on_copy_diagnostic_clicked)
-        lo.addWidget(self._copy_btn)
 
-        lo.addStretch()
+        export_btn = QPushButton("Export Profile")
+        export_btn.setFixedHeight(28)
+        export_btn.setStyleSheet(btn_style)
+        export_btn.setToolTip("Export account profile to text file")
+        export_btn.clicked.connect(self._on_export_profile)
+
+        # Row 1: operational actions
+        lo.addWidget(self._set_review_btn, 0, 0)
+        lo.addWidget(tb_btn, 0, 1)
+        lo.addWidget(limits_btn, 0, 2)
+
+        # Row 2: utility actions
+        lo.addWidget(open_btn, 1, 0)
+        lo.addWidget(self._copy_btn, 1, 1)
+        lo.addWidget(export_btn, 1, 2)
+
         return w
 
     # ------------------------------------------------------------------
@@ -372,6 +440,35 @@ class AccountDetailPanel(QWidget):
                 )
         # Fallback: let the main window handle it
         self.action_requested.emit("copy_diagnostic", self._current_account_id)
+
+    def _on_export_profile(self) -> None:
+        """Export current account profile to a text file."""
+        if self._current_data is None or self._service is None:
+            return
+
+        from PySide6.QtWidgets import QFileDialog
+
+        username = ""
+        if hasattr(self._current_data, "account"):
+            username = self._current_data.account.username
+        elif hasattr(self._current_data, "username"):
+            username = self._current_data.username
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Account Profile",
+            "oh_profile_%s.txt" % username,
+            "Text Files (*.txt);;All Files (*)",
+        )
+        if not path:
+            return
+
+        try:
+            diagnostic = self._service.format_diagnostic(self._current_data)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(diagnostic)
+        except Exception as exc:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Export Failed", "Failed to export:\n\n%s" % exc)
 
     def _show_copy_feedback(self) -> None:
         """Briefly change the Copy Diagnostic button text to confirm the copy."""

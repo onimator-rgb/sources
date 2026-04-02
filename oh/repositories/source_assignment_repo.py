@@ -130,6 +130,9 @@ class SourceAssignmentRepository:
                 COALESCE(SUM(lf.is_quality), 0)                     AS quality_account_count,
                 MAX(sa.updated_at)                                   AS last_analyzed_at
             FROM source_assignments sa
+            JOIN oh_accounts acct
+                ON  acct.id = sa.account_id
+                AND acct.removed_at IS NULL
             LEFT JOIN latest_fbr lf
                 ON  sa.account_id               = lf.account_id
                 AND LOWER(TRIM(sa.source_name)) = lf.source_key
@@ -192,6 +195,7 @@ class SourceAssignmentRepository:
                 lf.analyzed_at                        AS last_analyzed_at
             FROM source_assignments sa
             JOIN oh_accounts a  ON sa.account_id = a.id
+                                AND a.removed_at IS NULL
             LEFT JOIN oh_devices d ON a.device_id = d.device_id
             LEFT JOIN latest_fbr lf
                 ON  sa.account_id               = lf.account_id
@@ -257,16 +261,17 @@ class SourceAssignmentRepository:
 
     def get_active_source_counts(self) -> dict[int, int]:
         """
-        Return {account_id: active_source_count} for every account that has
-        at least one source with is_active=1.
+        Return {account_id: active_source_count} for every active (non-removed)
+        account that has at least one source with is_active=1.
         Accounts with no active sources are absent from the dict (count = 0).
         """
         rows = self._conn.execute(
             """
-            SELECT account_id, COUNT(*) AS cnt
-            FROM source_assignments
-            WHERE is_active = 1
-            GROUP BY account_id
+            SELECT sa.account_id, COUNT(*) AS cnt
+            FROM source_assignments sa
+            JOIN oh_accounts a ON a.id = sa.account_id
+            WHERE sa.is_active = 1 AND a.removed_at IS NULL
+            GROUP BY sa.account_id
             """
         ).fetchall()
         return {r["account_id"]: r["cnt"] for r in rows}
@@ -307,3 +312,28 @@ class SourceAssignmentRepository:
             (account_id, source_name.strip(), now),
         )
         self._conn.commit()
+
+    def deactivate_removed_accounts(self) -> int:
+        """Mark all source assignments as inactive for removed accounts.
+
+        Called after Scan & Sync to clean up stale assignments where
+        an account was removed but its sources are still marked active.
+
+        Returns the number of assignments deactivated.
+        """
+        cursor = self._conn.execute(
+            """
+            UPDATE source_assignments
+            SET is_active = 0, updated_at = ?
+            WHERE is_active = 1
+              AND account_id IN (
+                  SELECT id FROM oh_accounts WHERE removed_at IS NOT NULL
+              )
+            """,
+            (_utcnow(),),
+        )
+        self._conn.commit()
+        count = cursor.rowcount
+        if count:
+            logger.info("Deactivated %d stale source assignments for removed accounts", count)
+        return count

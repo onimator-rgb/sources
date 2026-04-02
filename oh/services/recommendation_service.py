@@ -19,6 +19,7 @@ from oh.models.recommendation import (
     Recommendation,
     REC_LOW_FBR_SOURCE, REC_SOURCE_EXHAUSTION, REC_LOW_LIKE,
     REC_LIMITS_MAX, REC_TB_MAX, REC_ZERO_ACTION,
+    REC_SOURCE_FBR_DECLINING, REC_SOURCE_EXHAUSTED,
     SEV_CRITICAL, SEV_HIGH, SEV_MEDIUM, SEV_LOW,
     TARGET_SOURCE, TARGET_ACCOUNT,
 )
@@ -48,11 +49,13 @@ class RecommendationService:
         account_repo: AccountRepository,
         tag_repo: TagRepository,
         settings_repo: SettingsRepository,
+        source_profile_repo=None,
     ) -> None:
         self._sources = global_sources_service
         self._accounts = account_repo
         self._tags = tag_repo
         self._settings = settings_repo
+        self._source_profile_repo = source_profile_repo
 
     # ------------------------------------------------------------------
     # Public API
@@ -124,6 +127,9 @@ class RecommendationService:
             rec = self._check_low_like(acc, sess, label)
             if rec:
                 recs.append(rec)
+
+        # --- Source health from FBR stats ---
+        self._check_source_health(recs)
 
         recs.sort(key=lambda r: r.sort_key)
 
@@ -201,6 +207,34 @@ class RecommendationService:
             ))
 
         return recs
+
+    def _check_source_health(self, recs: list) -> None:
+        """Generate source health recommendations from FBR stats."""
+        if self._source_profile_repo is None:
+            return
+
+        try:
+            stats = self._source_profile_repo.get_all_fbr_stats()
+        except Exception:
+            logger.debug("Failed to load FBR stats for source health check", exc_info=True)
+            return
+
+        for stat in stats:
+            # Low FBR across all accounts (weighted < 3%)
+            if stat.total_accounts_used >= 3 and stat.weighted_fbr_pct < 3.0 and stat.total_follows >= 50:
+                recs.append(Recommendation(
+                    rec_type=REC_SOURCE_FBR_DECLINING,
+                    severity=SEV_HIGH if stat.weighted_fbr_pct < 1.0 else SEV_MEDIUM,
+                    target_type=TARGET_SOURCE,
+                    target_id=stat.source_name,
+                    target_label=stat.source_name,
+                    reason=(
+                        f"Source @{stat.source_name} has {stat.weighted_fbr_pct:.1f}% weighted FBR "
+                        f"across {stat.total_accounts_used} accounts "
+                        f"({stat.total_follows} follows, {stat.total_followbacks} followbacks)"
+                    ),
+                    suggested_action="Consider removing this source from all accounts",
+                ))
 
     # ------------------------------------------------------------------
     # Account-level checks

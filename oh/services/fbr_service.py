@@ -41,11 +41,13 @@ class FBRService:
         account_repo: AccountRepository,
         settings_repo: SettingsRepository,
         assignment_repo: SourceAssignmentRepository,
+        source_profile_repo=None,
     ) -> None:
         self._snapshot_repo  = snapshot_repo
         self._account_repo   = account_repo
         self._settings       = settings_repo
         self._assignment_repo = assignment_repo
+        self._source_profile_repo = source_profile_repo
 
     # ------------------------------------------------------------------
     # Single-account analysis + save
@@ -142,6 +144,15 @@ class FBRService:
             f"{batch.succeeded} succeeded, {batch.failed} failed, "
             f"{batch.skipped} skipped of {batch.total} active accounts"
         )
+
+        # Update aggregated source FBR stats
+        if self._source_profile_repo is not None:
+            try:
+                count = self._source_profile_repo.update_fbr_stats()
+                logger.info("Updated FBR stats for %d sources", count)
+            except Exception as exc:
+                logger.warning("Failed to update source FBR stats: %s", exc)
+
         return batch
 
     # ------------------------------------------------------------------

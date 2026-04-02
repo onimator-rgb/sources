@@ -28,6 +28,7 @@ from oh.models.recommendation import (
     SEV_CRITICAL, SEV_HIGH, SEV_MEDIUM, SEV_LOW,
     REC_LOW_FBR_SOURCE, REC_SOURCE_EXHAUSTION, REC_LOW_LIKE,
     REC_LIMITS_MAX, REC_TB_MAX, REC_ZERO_ACTION,
+    REC_SOURCE_FBR_DECLINING, REC_SOURCE_EXHAUSTED,
     REC_TYPE_LABELS, TARGET_ACCOUNT, TARGET_SOURCE,
 )
 from oh.ui.style import sc
@@ -67,6 +68,8 @@ _SHORT_ACTIONS = {
     REC_LIMITS_MAX:       "Wymien zrodla",
     REC_TB_MAX:           "Przenies konto",
     REC_ZERO_ACTION:      "Sprawdz konto",
+    REC_SOURCE_FBR_DECLINING: "Usun slabe zrodlo",
+    REC_SOURCE_EXHAUSTED: "Wymien zrodlo",
 }
 
 

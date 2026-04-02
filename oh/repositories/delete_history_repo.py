@@ -114,6 +114,24 @@ class DeleteHistoryRepository:
         ).fetchall()
         return [self._item_from_row(r) for r in rows]
 
+    def get_items_for_account(self, account_id: int, limit: int = 20) -> list:
+        """Return delete items where the account was affected.
+
+        Searches across all actions and returns recent items.
+        Returns list of DeleteItem instances.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT i.*, a.deleted_at, a.delete_type, a.scope
+            FROM source_delete_items i
+            JOIN source_delete_actions a ON a.id = i.action_id
+            ORDER BY a.deleted_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [self._item_from_row(r) for r in rows]
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

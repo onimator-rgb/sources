@@ -1,6 +1,6 @@
 # OH — Roadmap
 
-> Maintained by the Architect agent (`/architect`). Last updated: 2026-04-01.
+> Maintained by the Architect agent (`/architect`). Last updated: 2026-04-02.
 > Full feature proposals live in `docs/plans/`.
 
 ## Shipped
@@ -37,41 +37,60 @@
 
 ---
 
-## Planned
+### Phase 5 — Account Detail View (2026-03-31 — 2026-04-02)
+- [x] QSplitter drawer infrastructure (open/close, account switching, keyboard nav)
+- [x] Summary tab (identity, performance cards, config, FBR snapshot, peer comparison)
+- [x] Alerts tab (auto-generated alerts, review status, contextual action cards)
+- [x] Inline quick actions (Set/Clear Review, TB+1, Limits+1, Open Folder, Copy Diagnostic)
+- [x] Keyboard shortcuts (Space toggle, Escape close, arrow nav)
+- [x] Embedded Sources tab (source table with FBR metrics, quality flags)
+- [x] History tab (unified timeline: operator actions, FBR analyses, sessions)
+- [x] Session history (`session_repo.get_recent_for_account()`)
+- [x] Peer comparison (device avg, fleet avg health scores)
+- [x] Related accounts panel (other accounts on same device with health)
+- [x] AccountDetailService (aggregation, alerts, diagnostics)
+- [x] Repo methods: `session_repo.get_recent_for_account()`, `delete_history_repo.get_items_for_account()`
+- [x] Source change log section in Summary tab
+- [x] Contextual action cards (follow pending, low sources, review flag)
+- [x] Export account profile to text file
 
-### Phase 5 — Account Detail View (CRITICAL)
+---
 
-> Full proposal: [`docs/plans/account_detail_view.md`](plans/account_detail_view.md)
+### Phase 6 — Bulk Source Discovery (2026-04-02)
+- [x] Migration 009: `bulk_discovery_runs` + `bulk_discovery_items` tables
+- [x] Models, Repository, Settings, Service (bulk pipeline, revert, qualifying accounts)
+- [x] Bulk Discovery Dialog (3-step wizard: preview → progress → results)
+- [x] Bulk Discovery History Dialog (past runs, drill-down, revert)
+- [x] Main Window + Sources Tab integration (toolbar buttons)
+- [x] Error handling (cancellable rate limit wait, worker cleanup, try/except)
+- [x] Test suite (54 tests: models, repo, service)
 
-**Problem:** Operators must jump between 5+ views to review a single account. At 100+ accounts this makes daily reviews impractical.
+### Phase 7 — Smart Source Discovery (2026-04-02)
+- [x] Migration 010: `source_profiles`, `source_fbr_stats`, search/candidate columns
+- [x] NicheClassifier module (20 niches, PL+EN keywords, language detection)
+- [x] Source Profile Repository + FBR stats aggregation
+- [x] Multi-strategy search pipeline (niche exact/broad/related + suggested)
+- [x] Composite ranking (niche match 35% + AI 25% + ER 20% + strategy 10% + language 10%)
+- [x] Quality gate (reject off-topic candidates)
+- [x] Scan & Index Sources button in Settings (bulk index all active sources via HikerAPI)
+- [x] Test suite (51 tests: niche classifier, source profile repo)
 
-**Solution:** Right-side drawer panel that opens on account click, consolidating all account data into one tabbed interface with inline actions.
+### Phase 8 — Operational Features v2 (2026-04-02)
+- [x] Account Health Score (0-100 composite metric, color-coded column)
+- [x] Source Health Dashboard (new Source Profiles tab with niche/FBR/filters)
+- [x] Source Blacklist (manage in Settings, checked during discovery)
+- [x] Account Notes (operator_notes field, visible in drawer)
+- [x] CSV Export (export visible Accounts table rows)
+- [x] Source Performance Recommendations (REC_SOURCE_FBR_DECLINING in Cockpit)
+- [x] Auto-Scan Scheduler (configurable interval 1-24h, QTimer-based)
 
-#### Phase 5a — MVP (3-5 days)
-- [ ] QSplitter drawer infrastructure (open/close, account switching, keyboard nav)
-- [ ] Summary tab (identity, performance cards, config, FBR snapshot summary)
-- [ ] Alerts tab (auto-generated alerts, review status, contextual recommendation cards)
-- [ ] Inline quick actions (Set/Clear Review, TB+1, Limits+1, Open Folder, Copy Diagnostic)
-- [ ] Keyboard shortcuts (Space toggle, Escape close, arrow nav)
+### Phase 9 — Fleet & Intelligence (2026-04-02)
+- [x] Device Fleet Dashboard (new Fleet tab: per-device metrics, detail pane, health aggregation)
+- [x] Source Performance Trends (FBR trend arrows + tooltips in Sources tab)
+- [x] Cross-Account Source Optimizer (niche FBR variance detection, mismatch suggestions)
+- [x] Campaign Templates (migration 012, CRUD, editor dialog, niche-aware presets)
 
-#### Phase 5b — Full (3-5 days)
-- [ ] Embedded Sources tab (full source table with FBR + usage, inline add/remove/cleanup)
-- [ ] History tab (unified timeline: operator actions, FBR analyses, source changes, sessions)
-- [ ] Session history (14-day snapshot table)
-- [ ] Peer comparison (device avg, fleet avg for key metrics)
-- [ ] Related accounts panel (other accounts on same device)
-- [ ] AccountDetailService (aggregation service, lazy loading)
-- [ ] New repo methods: `session_repo.get_recent_for_account()`, `delete_history_repo.get_items_for_account()`
-
-#### Phase 5c — Polish (2-3 days)
-- [ ] Performance trends (7-day sparklines for follow/like counts)
-- [ ] Source change log (add/remove timeline)
-- [ ] Pin/compare mode (keep drawer open while selecting different accounts)
-- [ ] Expand to full-page dialog
-- [ ] Contextual action cards (follow pending, try again later, no DM sources)
-- [ ] Export/print account profile
-
-**Dependencies:** None — builds entirely on existing infrastructure (no new tables or migrations).
+**Dependencies:** Phase 2 (Source Finder — already shipped).
 
 ---
 

@@ -70,13 +70,15 @@ class AccountSummaryTab(QScrollArea):
 
         self._container = QWidget()
         self._root = QVBoxLayout(self._container)
-        self._root.setContentsMargins(6, 6, 6, 6)
+        self._root.setContentsMargins(8, 8, 8, 8)
         self._root.setSpacing(6)
 
         self._build_identity_block()
         self._build_performance_cards()
         self._build_configuration_block()
         self._build_fbr_snapshot_block()
+        self._build_peer_comparison_block()
+        self._build_source_changes_block()
         self._root.addStretch()
 
         self.setWidget(self._container)
@@ -138,6 +140,12 @@ class AccountSummaryTab(QScrollArea):
         review_lo.addStretch()
         lo.addWidget(self._id_review_frame)
 
+        # Operator notes
+        self._id_notes = _label(size=11, color_key="text_secondary")
+        self._id_notes.setWordWrap(True)
+        self._id_notes.setVisible(False)
+        lo.addWidget(self._id_notes)
+
         self._root.addWidget(frame)
 
     def _load_identity(self, data: AccountDetailData) -> None:
@@ -193,13 +201,23 @@ class AccountSummaryTab(QScrollArea):
         else:
             self._id_review_frame.setVisible(False)
 
+        # Operator notes
+        notes = getattr(acct, "operator_notes", None) or ""
+        if notes:
+            self._id_notes.setText(
+                "<b>Notes:</b> %s" % notes
+            )
+            self._id_notes.setVisible(True)
+        else:
+            self._id_notes.setVisible(False)
+
     # ------------------------------------------------------------------
     # 2. Performance cards
     # ------------------------------------------------------------------
 
     def _build_performance_cards(self) -> None:
-        row = QHBoxLayout()
-        row.setSpacing(6)
+        cards_grid = QGridLayout()
+        cards_grid.setSpacing(6)
 
         # Card 1: Today's Activity
         self._card_activity_frame = _card_frame("muted")
@@ -210,7 +228,6 @@ class AccountSummaryTab(QScrollArea):
         c1_lo.addWidget(self._card_activity_title)
         self._card_activity_body = _label(size=11)
         c1_lo.addWidget(self._card_activity_body)
-        row.addWidget(self._card_activity_frame)
 
         # Card 2: FBR Status
         self._card_fbr_frame = _card_frame("muted")
@@ -221,7 +238,6 @@ class AccountSummaryTab(QScrollArea):
         c2_lo.addWidget(self._card_fbr_title)
         self._card_fbr_body = _label(size=11)
         c2_lo.addWidget(self._card_fbr_body)
-        row.addWidget(self._card_fbr_frame)
 
         # Card 3: Source Health
         self._card_source_frame = _card_frame("muted")
@@ -232,7 +248,6 @@ class AccountSummaryTab(QScrollArea):
         c3_lo.addWidget(self._card_source_title)
         self._card_source_body = _label(size=11)
         c3_lo.addWidget(self._card_source_body)
-        row.addWidget(self._card_source_frame)
 
         # Card 4: Account Health
         self._card_health_frame = _card_frame("muted")
@@ -243,9 +258,13 @@ class AccountSummaryTab(QScrollArea):
         c4_lo.addWidget(self._card_health_title)
         self._card_health_body = _label(size=11)
         c4_lo.addWidget(self._card_health_body)
-        row.addWidget(self._card_health_frame)
 
-        self._root.addLayout(row)
+        cards_grid.addWidget(self._card_activity_frame, 0, 0)
+        cards_grid.addWidget(self._card_fbr_frame, 0, 1)
+        cards_grid.addWidget(self._card_source_frame, 1, 0)
+        cards_grid.addWidget(self._card_health_frame, 1, 1)
+
+        self._root.addLayout(cards_grid)
 
     def _set_card_border(self, frame: QFrame, color_key: str) -> None:
         """Update the left-border color of a performance card."""
@@ -500,3 +519,144 @@ class AccountSummaryTab(QScrollArea):
             self._fbr_schema_error.setVisible(True)
         else:
             self._fbr_schema_error.setVisible(False)
+
+    # ------------------------------------------------------------------
+    # 5. Peer Comparison block
+    # ------------------------------------------------------------------
+
+    def _build_peer_comparison_block(self) -> None:
+        self._peer_frame = QFrame()
+        self._peer_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._peer_frame.setVisible(False)
+
+        lo = QVBoxLayout(self._peer_frame)
+        lo.setContentsMargins(8, 6, 8, 6)
+        lo.setSpacing(4)
+
+        title = _label("Peer Comparison", bold=True, size=11, color_key="heading")
+        lo.addWidget(title)
+
+        self._peer_grid = QGridLayout()
+        self._peer_grid.setSpacing(4)
+
+        # Header row
+        for col, text in enumerate(["Metric", "This", "Device", "Fleet"]):
+            lbl = _label(text, bold=True, size=11, color_key="muted")
+            self._peer_grid.addWidget(lbl, 0, col)
+
+        # Data rows — created once, updated by load_peer_data
+        self._peer_labels = {}  # type: dict
+        row_defs = [
+            ("health", "Health Score"),
+        ]
+        for i, (key, label_text) in enumerate(row_defs, start=1):
+            metric_lbl = _label(label_text, size=11)
+            self._peer_grid.addWidget(metric_lbl, i, 0)
+            this_lbl = _label("--", size=11)
+            self._peer_grid.addWidget(this_lbl, i, 1)
+            device_lbl = _label("--", size=11)
+            self._peer_grid.addWidget(device_lbl, i, 2)
+            fleet_lbl = _label("--", size=11)
+            self._peer_grid.addWidget(fleet_lbl, i, 3)
+            self._peer_labels[key] = (this_lbl, device_lbl, fleet_lbl)
+
+        lo.addLayout(self._peer_grid)
+        self._root.addWidget(self._peer_frame)
+
+    def load_peer_data(self, peer_data: dict) -> None:
+        """Load peer comparison data.
+
+        peer_data keys:
+            account_health, device_avg_health, fleet_avg_health
+        """
+        if not peer_data:
+            self._peer_frame.setVisible(False)
+            return
+
+        acc_health = peer_data.get("account_health", 0)
+        dev_health = peer_data.get("device_avg_health", 0)
+        fleet_health = peer_data.get("fleet_avg_health", 0)
+
+        # Update health row
+        if "health" in self._peer_labels:
+            this_lbl, device_lbl, fleet_lbl = self._peer_labels["health"]
+
+            this_lbl.setText(
+                "<span style='color:%s; font-weight:bold;'>%.0f</span>"
+                % (sc(self._peer_color(acc_health, dev_health)).name(), acc_health)
+            )
+            device_lbl.setText("%.0f" % dev_health)
+            fleet_lbl.setText("%.0f" % fleet_health)
+
+        self._peer_frame.setVisible(True)
+
+    @staticmethod
+    def _peer_color(value: float, avg: float) -> str:
+        """Return color key: green if above average, red if below."""
+        if value >= avg:
+            return "success"
+        return "error"
+
+    # ------------------------------------------------------------------
+    # 6. Recent Source Changes block
+    # ------------------------------------------------------------------
+
+    def _build_source_changes_block(self) -> None:
+        self._src_changes_frame = QFrame()
+        self._src_changes_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._src_changes_frame.setVisible(False)
+
+        self._src_changes_lo = QVBoxLayout(self._src_changes_frame)
+        self._src_changes_lo.setContentsMargins(8, 6, 8, 6)
+        self._src_changes_lo.setSpacing(4)
+
+        title = _label("Recent Source Changes", bold=True, size=11, color_key="heading")
+        self._src_changes_lo.addWidget(title)
+
+        self._src_changes_body = QWidget()
+        self._src_changes_body_lo = QVBoxLayout(self._src_changes_body)
+        self._src_changes_body_lo.setContentsMargins(0, 0, 0, 0)
+        self._src_changes_body_lo.setSpacing(2)
+        self._src_changes_lo.addWidget(self._src_changes_body)
+
+        self._root.addWidget(self._src_changes_frame)
+
+    def load_source_changes(self, changes: list) -> None:
+        """Show recent source changes.
+
+        changes: list of dicts with 'date', 'action' ('added'/'removed'), 'source_name'
+        """
+        # Clear previous entries
+        while self._src_changes_body_lo.count():
+            item = self._src_changes_body_lo.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
+        if not changes:
+            self._src_changes_frame.setVisible(False)
+            return
+
+        for change in changes[:5]:
+            date_str = change.get("date", "")
+            action = change.get("action", "")
+            source_name = change.get("source_name", "")
+
+            if action == "added":
+                symbol = "+"
+                color = sc("yes").name()
+            else:
+                symbol = "-"
+                color = sc("no").name()
+
+            entry = _label(
+                "<span style='color:%s;'>%s  %s @%s (%s)</span>"
+                % (sc("muted").name(), date_str,
+                   "<span style='color:%s;'>%s</span>" % (color, symbol),
+                   source_name, action),
+                size=11,
+            )
+            self._src_changes_body_lo.addWidget(entry)
+
+        self._src_changes_frame.setVisible(True)

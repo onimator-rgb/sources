@@ -27,11 +27,13 @@ class ScanService:
         device_repo: DeviceRepository,
         sync_repo: SyncRepository,
         session_service=None,
+        assignment_repo=None,
     ) -> None:
         self._account_repo = account_repo
         self._device_repo = device_repo
         self._sync_repo = sync_repo
         self._session_service = session_service
+        self._assignment_repo = assignment_repo
         self._last_bot_root: Optional[str] = None
 
     def scan(self, bot_root: str) -> list:
@@ -66,5 +68,16 @@ class ScanService:
                     f"[Session] Post-sync collection failed: {e}",
                     exc_info=True,
                 )
+
+        # --- Cleanup stale source assignments (post-sync, non-fatal) ---
+        if self._assignment_repo is not None:
+            try:
+                deactivated = self._assignment_repo.deactivate_removed_accounts()
+                if deactivated:
+                    logger.info(
+                        f"[Cleanup] Deactivated {deactivated} stale source assignments"
+                    )
+            except Exception as e:
+                logger.warning(f"[Cleanup] Failed: {e}")
 
         return sync_run

@@ -23,6 +23,9 @@ from oh.repositories.device_repo import DeviceRepository
 from oh.repositories.fbr_snapshot_repo import FBRSnapshotRepository
 from oh.repositories.settings_repo import SettingsRepository
 from oh.repositories.source_assignment_repo import SourceAssignmentRepository
+from oh.repositories.blacklist_repo import BlacklistRepository
+from oh.repositories.bulk_discovery_repo import BulkDiscoveryRepository
+from oh.repositories.source_profile_repo import SourceProfileRepository
 from oh.repositories.source_search_repo import SourceSearchRepository
 from oh.repositories.sync_repo import SyncRepository
 from oh.repositories.operator_action_repo import OperatorActionRepository
@@ -35,6 +38,7 @@ from oh.services.global_sources_service import GlobalSourcesService
 from oh.services.scan_service import ScanService
 from oh.services.session_service import SessionService
 from oh.services.source_delete_service import SourceDeleteService
+from oh.services.bulk_discovery_service import BulkDiscoveryService
 from oh.services.source_finder_service import SourceFinderService
 try:
     from oh.services.account_detail_service import AccountDetailService
@@ -202,13 +206,16 @@ def main() -> None:
         device_repo=DeviceRepository(conn),
         sync_repo=SyncRepository(conn),
         session_service=session_service,
+        assignment_repo=assignment_repo,
     )
+    source_profile_repo   = SourceProfileRepository(conn)
     fbr_snapshot_repo     = FBRSnapshotRepository(conn)
     fbr_service = FBRService(
         snapshot_repo=fbr_snapshot_repo,
         account_repo=account_repo,
         settings_repo=settings_repo,
         assignment_repo=assignment_repo,
+        source_profile_repo=source_profile_repo,
     )
     global_sources_service = GlobalSourcesService(
         account_repo=account_repo,
@@ -238,6 +245,16 @@ def main() -> None:
         search_repo=source_search_repo,
         account_repo=account_repo,
         settings_repo=settings_repo,
+        source_profile_repo=source_profile_repo,
+    )
+
+    bulk_discovery_repo = BulkDiscoveryRepository(conn)
+    bulk_discovery_service = BulkDiscoveryService(
+        bulk_repo=bulk_discovery_repo,
+        source_finder_service=source_finder_service,
+        account_repo=account_repo,
+        assignment_repo=assignment_repo,
+        settings_repo=settings_repo,
     )
 
     recommendation_service = RecommendationService(
@@ -245,6 +262,7 @@ def main() -> None:
         account_repo=account_repo,
         tag_repo=tag_repo,
         settings_repo=settings_repo,
+        source_profile_repo=source_profile_repo,
     )
 
     account_detail_service = None
@@ -258,6 +276,8 @@ def main() -> None:
         except Exception:
             logger.warning("AccountDetailService failed to initialise.", exc_info=True)
 
+    blacklist_repo = BlacklistRepository(conn)
+
     window = MainWindow(
         conn,
         scan_service,
@@ -270,7 +290,9 @@ def main() -> None:
         tag_repo=tag_repo,
         recommendation_service=recommendation_service,
         source_finder_service=source_finder_service,
+        bulk_discovery_service=bulk_discovery_service,
         account_detail_service=account_detail_service,
+        blacklist_repo=blacklist_repo,
     )
     window.show()
 

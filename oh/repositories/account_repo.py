@@ -266,4 +266,6 @@ class AccountRepository:
             bot_tags_raw=row["bot_tags_raw"] if "bot_tags_raw" in keys else None,
             like_limit_perday=row["like_limit_perday"] if "like_limit_perday" in keys else None,
             follow_limit_perday=row["follow_limit_perday"] if "follow_limit_perday" in keys else None,
+            # --- Quick Wins fields (migration 011) ---
+            operator_notes=row["operator_notes"] if "operator_notes" in keys else None,
         )

@@ -10,10 +10,11 @@ from PySide6.QtWidgets import (
     QFrame,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QFont
 
 from oh.models.fbr import SourceFBRRecord
 from oh.models.global_source import GlobalSourceRecord
+from oh.ui.style import sc
 
 
 class DeleteConfirmDialog(QDialog):
@@ -193,7 +194,7 @@ class DeleteConfirmDialog(QDialog):
                 f"{src.weighted_fbr_pct:.1f}%" if src.weighted_fbr_pct is not None else "—"
             )
             fbr_item.setTextAlignment(center)
-            fbr_item.setForeground(QColor("#e05555"))
+            fbr_item.setForeground(sc("error"))
             t.setItem(r, 1, fbr_item)
             acc_item = QTableWidgetItem(str(src.active_accounts))
             acc_item.setTextAlignment(center)
@@ -250,7 +251,7 @@ class DeleteConfirmDialog(QDialog):
         font.setBold(True)
         font.setPointSize(11)
         lbl.setFont(font)
-        lbl.setStyleSheet("color: #4caf7d;")
+        lbl.setStyleSheet("color: %s;" % sc("success").name())
         lo.addWidget(lbl)
 
         sources_preview = ", ".join(source_names[:5])
@@ -281,8 +282,9 @@ class DeleteConfirmDialog(QDialog):
         confirm_btn = QPushButton(confirm_btn_text)
         confirm_btn.setFixedHeight(28)
         confirm_btn.setStyleSheet(
-            "QPushButton { background: #1a6b3a; color: white; border-radius: 3px; }"
-            "QPushButton:hover { background: #20a050; }"
+            "QPushButton { background: %s; color: white; border-radius: 3px; }"
+            "QPushButton:hover { background: %s; }"
+            % (sc("success").name(), sc("status_ok").name())
         )
         confirm_btn.clicked.connect(self.accept)
         row_lo.addWidget(confirm_btn)
@@ -315,7 +317,7 @@ class DeleteConfirmDialog(QDialog):
             warn = QLabel(
                 f"Warning: only {remaining} source(s) will remain after cleanup."
             )
-            warn.setStyleSheet("color: #e6a817; font-weight: bold;")
+            warn.setStyleSheet("color: %s; font-weight: bold;" % sc("warning").name())
             lo.addWidget(warn)
 
         # Table with checkboxes
@@ -353,7 +355,7 @@ class DeleteConfirmDialog(QDialog):
 
             fbr_item = QTableWidgetItem(f"{src.fbr_percent:.1f}%")
             fbr_item.setTextAlignment(center)
-            fbr_item.setForeground(QColor("#e05555"))
+            fbr_item.setForeground(sc("error"))
             t.setItem(r, 3, fbr_item)
 
         lo.addWidget(t)
@@ -393,18 +395,18 @@ class DeleteConfirmDialog(QDialog):
         font.setBold(True)
         font.setPointSize(11)
         lbl.setFont(font)
-        lbl.setStyleSheet("color: #e05555;")
+        lbl.setStyleSheet("color: %s;" % sc("error").name())
         return lbl
 
     @staticmethod
     def _note(text: str) -> QFrame:
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
-        frame.setStyleSheet("background: #2a2a2e; border-radius: 4px; padding: 4px;")
+        frame.setStyleSheet("background: %s; border-radius: 4px; padding: 4px;" % sc("bg_note").name())
         lo = QVBoxLayout(frame)
         lo.setContentsMargins(8, 6, 8, 6)
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #aaa; font-size: 11px;")
+        lbl.setStyleSheet("color: %s; font-size: 11px;" % sc("text_secondary").name())
         lbl.setWordWrap(True)
         lo.addWidget(lbl)
         return frame
@@ -422,8 +424,9 @@ class DeleteConfirmDialog(QDialog):
         confirm_btn = QPushButton(confirm_text)
         confirm_btn.setFixedHeight(28)
         confirm_btn.setStyleSheet(
-            "QPushButton { background: #8b1a1a; color: white; border-radius: 3px; }"
-            "QPushButton:hover { background: #c02020; }"
+            "QPushButton { background: %s; color: white; border-radius: 3px; }"
+            "QPushButton:hover { background: %s; }"
+            % (sc("error").name(), sc("critical").name())
         )
         confirm_btn.clicked.connect(self.accept)
         lo.addWidget(confirm_btn)

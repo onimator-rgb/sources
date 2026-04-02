@@ -46,6 +46,7 @@ from oh.modules.source_usage_reader import SourceUsageReader
 from oh.repositories.account_repo import AccountRepository
 from oh.repositories.settings_repo import SettingsRepository
 from oh.repositories.sync_repo import SyncRepository
+from oh.services.account_health_service import AccountHealthService
 from oh.services.fbr_service import FBRService
 from oh.services.global_sources_service import GlobalSourcesService
 from oh.services.scan_service import ScanService
@@ -55,10 +56,13 @@ from oh.services.recommendation_service import RecommendationService
 from oh.services.source_delete_service import SourceDeleteService
 from oh.resources import asset_path, asset_exists
 from oh.ui.account_detail_panel import AccountDetailPanel
+from oh.ui.device_fleet_tab import DeviceFleetTab
 from oh.ui.settings_tab import SettingsTab
 from oh.ui.source_dialog import SourceDialog
+from oh.ui.source_profiles_tab import SourceProfilesTab
 from oh.ui.sources_tab import SourcesTab
 from oh.ui.workers import WorkerThread
+from oh.repositories.source_profile_repo import SourceProfileRepository
 
 logger = logging.getLogger(__name__)
 
@@ -68,34 +72,37 @@ logger = logging.getLogger(__name__)
 
 COL_USERNAME    = 0
 COL_DEVICE      = 1
-COL_STATUS      = 2
-COL_TAGS        = 3
-COL_FOLLOW      = 4
-COL_UNFOLLOW    = 5
-COL_LIMIT       = 6
-COL_FOLLOW_TODAY = 7
-COL_LIKE_TODAY   = 8
-COL_FOLLOW_LIM   = 9
-COL_LIKE_LIM     = 10
-COL_REVIEW       = 11
-COL_DATA_DB     = 12
-COL_SOURCES_TXT = 13
-COL_DISCOVERED  = 14
-COL_LAST_SEEN   = 15
-COL_SRC_COUNT   = 16   # active source count — from source_assignments
-COL_FBR_QUALITY = 17   # "3/12" quality/total — from latest snapshot
-COL_FBR_BEST    = 18   # best FBR % — from latest snapshot
-COL_FBR_DATE    = 19   # date of last FBR analysis
-COL_ACTIONS     = 20
+COL_HOURS       = 2   # working hours (start_time - end_time)
+COL_STATUS      = 3
+COL_TAGS        = 4
+COL_FOLLOW      = 5
+COL_UNFOLLOW    = 6
+COL_LIMIT       = 7
+COL_FOLLOW_TODAY = 8
+COL_LIKE_TODAY   = 9
+COL_FOLLOW_LIM   = 10
+COL_LIKE_LIM     = 11
+COL_REVIEW       = 12
+COL_DATA_DB     = 13
+COL_SOURCES_TXT = 14
+COL_DISCOVERED  = 15
+COL_LAST_SEEN   = 16
+COL_SRC_COUNT   = 17   # active source count — from source_assignments
+COL_FBR_QUALITY = 18   # "3/12" quality/total — from latest snapshot
+COL_FBR_BEST    = 19   # best FBR % — from latest snapshot
+COL_FBR_DATE    = 20   # date of last FBR analysis
+COL_HEALTH      = 21   # composite health score (0-100)
+COL_ACTIONS     = 22
 
 COLUMN_HEADERS = [
-    "Username", "Device", "Status", "Tags",
+    "Username", "Device", "Hours", "Status", "Tags",
     "Follow", "Unfollow", "Limit/Day",
     "Follow Today", "Like Today", "F. Limit", "L. Limit", "Review",
     "Data DB", "Sources.txt",
     "Discovered", "Last Seen",
     "Active Sources",
     "Quality/Total", "Best FBR %", "Last FBR",
+    "Health",
     "Actions",
 ]
 
@@ -179,9 +186,12 @@ class MainWindow(QMainWindow):
         tag_repo=None,
         recommendation_service: Optional[RecommendationService] = None,
         source_finder_service=None,
+        bulk_discovery_service=None,
         account_detail_service=None,
+        blacklist_repo=None,
     ) -> None:
         super().__init__()
+        self._blacklist_repo          = blacklist_repo
         self._account_detail_service  = account_detail_service
         self._scan_service            = scan_service
         self._fbr_service             = fbr_service
@@ -193,6 +203,7 @@ class MainWindow(QMainWindow):
         self._tag_repo                = tag_repo
         self._recommendation_service  = recommendation_service
         self._source_finder_service   = source_finder_service
+        self._bulk_discovery_service  = bulk_discovery_service
         self._settings                = SettingsRepository(conn)
         self._accounts                = AccountRepository(conn)
         self._sync_repo               = SyncRepository(conn)
@@ -213,11 +224,34 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("OH — Operational Hub")
         self.setMinimumSize(1100, 650)
 
-        self._sources_tab  = SourcesTab(global_sources_service, source_delete_service)
-        self._settings_tab = SettingsTab(self._settings)
+        self._sources_tab  = SourcesTab(
+            global_sources_service, source_delete_service,
+            bulk_discovery_service=self._bulk_discovery_service,
+            settings_repo=self._settings,
+            conn=conn,
+        )
+        self._settings_tab = SettingsTab(
+            self._settings,
+            source_finder_service=self._source_finder_service,
+            blacklist_repo=self._blacklist_repo,
+        )
+        self._source_profile_repo = SourceProfileRepository(conn)
+        self._source_profiles_tab = SourceProfilesTab(self._source_profile_repo)
+        self._fleet_tab = DeviceFleetTab(conn)
         self._build_ui()
         self._refresh_table()
         self._update_last_sync_label()
+
+        # Auto-scan timer
+        self._auto_scan_timer = QTimer(self)
+        self._auto_scan_timer.timeout.connect(self._on_auto_scan)
+        self._setup_auto_scan()
+
+        # Reconfigure auto-scan when settings are saved
+        self._settings_tab.settings_saved.connect(self._setup_auto_scan)
+
+        # Check for updates after 3 second delay (don't block startup)
+        QTimer.singleShot(3000, self._check_for_updates)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -237,6 +271,8 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget()
         self._tabs.addTab(self._make_accounts_page(), "Accounts")
         self._tabs.addTab(self._sources_tab, "Sources")
+        self._tabs.addTab(self._source_profiles_tab, "Source Profiles")
+        self._tabs.addTab(self._fleet_tab, "Fleet")
         self._tabs.addTab(self._settings_tab, "Settings")
         self._tabs.currentChanged.connect(self._on_tab_changed)
         outer.addWidget(self._tabs, stretch=1)
@@ -289,7 +325,12 @@ class MainWindow(QMainWindow):
         if index == 1:  # Sources tab
             self._sources_tab.set_bot_root(self._settings.get_bot_root())
             self._sources_tab.load_data()
-        elif index == 2:  # Settings tab — reload in case values changed externally
+        elif index == 2:  # Source Profiles tab
+            self._source_profiles_tab.load_data()
+        elif index == 3:  # Fleet tab
+            if not self._fleet_tab._loaded:
+                self._fleet_tab.load_data()
+        elif index == 4:  # Settings tab — reload in case values changed externally
             self._settings_tab._load()
 
     def _make_brand_bar(self) -> QFrame:
@@ -429,6 +470,12 @@ class MainWindow(QMainWindow):
         self._recs_btn.setToolTip("Generate and view operational recommendations")
         self._recs_btn.clicked.connect(self._on_recommendations)
 
+        self._export_btn = QPushButton("Export CSV")
+        self._export_btn.setFixedHeight(34)
+        self._export_btn.setSizePolicy(_btn_policy)
+        self._export_btn.setToolTip("Export visible accounts to CSV file")
+        self._export_btn.clicked.connect(self._on_export_csv)
+
         lo.addWidget(self._cockpit_btn)
         lo.addWidget(self._scan_btn)
         lo.addWidget(self._fbr_btn)
@@ -436,6 +483,7 @@ class MainWindow(QMainWindow):
         lo.addWidget(self._report_btn)
         lo.addWidget(self._recs_btn)
         lo.addWidget(self._history_btn)
+        lo.addWidget(self._export_btn)
         lo.addSpacing(12)
         lo.addWidget(self._busy_label, stretch=1)
         lo.addWidget(self._last_sync_label)
@@ -567,29 +615,31 @@ class MainWindow(QMainWindow):
                     COL_REVIEW,
                     COL_DATA_DB, COL_SOURCES_TXT, COL_SRC_COUNT,
                     COL_FBR_QUALITY, COL_FBR_BEST, COL_FBR_DATE,
-                    COL_ACTIONS):
+                    COL_HOURS, COL_HEALTH, COL_ACTIONS):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
 
         t.setColumnWidth(COL_USERNAME,     170)
         t.setColumnWidth(COL_DEVICE,       120)
         t.setColumnWidth(COL_STATUS,        72)
         t.setColumnWidth(COL_TAGS,         110)
-        t.setColumnWidth(COL_FOLLOW,        56)
-        t.setColumnWidth(COL_UNFOLLOW,      68)
-        t.setColumnWidth(COL_LIMIT,         66)
+        t.setColumnWidth(COL_FOLLOW,        46)
+        t.setColumnWidth(COL_UNFOLLOW,      52)
+        t.setColumnWidth(COL_LIMIT,         56)
         t.setColumnWidth(COL_FOLLOW_TODAY,  84)
         t.setColumnWidth(COL_LIKE_TODAY,    76)
-        t.setColumnWidth(COL_FOLLOW_LIM,    60)
-        t.setColumnWidth(COL_LIKE_LIM,      56)
-        t.setColumnWidth(COL_REVIEW,        58)
-        t.setColumnWidth(COL_DATA_DB,       60)
-        t.setColumnWidth(COL_SOURCES_TXT,   80)
+        t.setColumnWidth(COL_FOLLOW_LIM,    50)
+        t.setColumnWidth(COL_LIKE_LIM,      50)
+        t.setColumnWidth(COL_REVIEW,        48)
+        t.setColumnWidth(COL_DATA_DB,       48)
+        t.setColumnWidth(COL_SOURCES_TXT,   68)
         t.setColumnWidth(COL_DISCOVERED,    96)
         t.setColumnWidth(COL_LAST_SEEN,     96)
         t.setColumnWidth(COL_SRC_COUNT,     76)
-        t.setColumnWidth(COL_FBR_QUALITY,   88)
+        t.setColumnWidth(COL_FBR_QUALITY,   76)
         t.setColumnWidth(COL_FBR_BEST,      76)
-        t.setColumnWidth(COL_FBR_DATE,      86)
+        t.setColumnWidth(COL_FBR_DATE,      72)
+        t.setColumnWidth(COL_HOURS,         76)
+        t.setColumnWidth(COL_HEALTH,        52)
         t.setColumnWidth(COL_ACTIONS,       80)
 
         t.doubleClicked.connect(self._on_row_double_clicked)
@@ -703,6 +753,8 @@ class MainWindow(QMainWindow):
                     op_tags_map=self._op_tags_map,
                 )
                 self._detail_panel.load_account(detail_data)
+                self._load_peer_and_related(detail_data, acc)
+                self._load_detail_sources_and_history(account_id)
                 return
             except Exception:
                 logger.debug(
@@ -726,6 +778,137 @@ class MainWindow(QMainWindow):
             review_note=acc.review_note,
         )
         self._detail_panel.load_account(fallback)
+        self._load_detail_sources_and_history(account_id)
+
+    def _load_detail_sources_and_history(self, account_id: int) -> None:
+        """Load Sources and History tab data for the detail drawer."""
+        # --- Sources tab ---
+        try:
+            snap = self._fbr_map.get(account_id)
+            if snap is not None and snap.id is not None:
+                from oh.repositories.fbr_snapshot_repo import FBRSnapshotRepository
+                fbr_repo = FBRSnapshotRepository(self._conn)
+                source_results = fbr_repo.get_source_results(snap.id)
+                sources_data = []
+                for sr in source_results:
+                    sources_data.append({
+                        "source_name": sr.source_name,
+                        "is_active": True,
+                        "follow_count": sr.follow_count,
+                        "followback_count": sr.followback_count,
+                        "fbr_percent": sr.fbr_percent,
+                        "is_quality": sr.is_quality,
+                    })
+                self._detail_panel._sources_tab.load_sources(sources_data)
+            else:
+                self._detail_panel._sources_tab.load_sources([])
+        except Exception as exc:
+            logger.debug("Failed to load sources for drawer: %s", exc)
+
+        # --- History tab ---
+        try:
+            actions = []
+            if self._operator_action_repo is not None:
+                actions = self._operator_action_repo.get_for_account(account_id)
+
+            fbr_snapshots = []
+            try:
+                from oh.repositories.fbr_snapshot_repo import FBRSnapshotRepository
+                fbr_repo = FBRSnapshotRepository(self._conn)
+                fbr_snapshots = fbr_repo.get_for_account(account_id)
+            except Exception:
+                pass
+
+            self._detail_panel._history_tab.load_history(
+                actions=actions,
+                fbr_snapshots=fbr_snapshots,
+                sessions=[],
+            )
+        except Exception as exc:
+            logger.debug("Failed to load history for drawer: %s", exc)
+
+    def _load_peer_and_related(self, data, acc) -> None:
+        """Compute peer comparison and related accounts for the detail panel."""
+        device_accounts = []  # type: list
+        acc_id = None
+        # Peer comparison
+        try:
+            acc_id = data.account.id if hasattr(data, "account") else getattr(data, "account_id", None)
+            device_id = data.account.device_id if hasattr(data, "account") else getattr(data, "device_id", "")
+            min_src_th = self._settings.get_min_source_count_warning()
+
+            # This account's health
+            acc_health = AccountHealthService.compute_score(
+                data.account, data.fbr_snapshot, data.session,
+                data.source_count or 0, data.operator_tags or "",
+                min_src_th,
+            )
+
+            # Device avg — accounts on same device
+            device_accounts = [
+                a for a in self._all_accounts
+                if a.device_id == device_id and a.removed_at is None
+            ]
+            device_healths = []
+            for da in device_accounts:
+                dh = AccountHealthService.compute_score(
+                    da, self._fbr_map.get(da.id), self._session_map.get(da.id),
+                    self._source_count_map.get(da.id, 0),
+                    self._op_tags_map.get(da.id, "") or "",
+                    min_src_th,
+                )
+                device_healths.append(dh)
+            device_avg = sum(device_healths) / len(device_healths) if device_healths else 0
+
+            # Fleet avg — all active accounts
+            fleet_healths = []
+            for fa in self._all_accounts:
+                if fa.removed_at is not None:
+                    continue
+                fh = AccountHealthService.compute_score(
+                    fa, self._fbr_map.get(fa.id), self._session_map.get(fa.id),
+                    self._source_count_map.get(fa.id, 0),
+                    self._op_tags_map.get(fa.id, "") or "",
+                    min_src_th,
+                )
+                fleet_healths.append(fh)
+            fleet_avg = sum(fleet_healths) / len(fleet_healths) if fleet_healths else 0
+
+            peer_data = {
+                "account_health": acc_health,
+                "device_avg_health": round(device_avg, 1),
+                "fleet_avg_health": round(fleet_avg, 1),
+            }
+            self._detail_panel._summary_tab.load_peer_data(peer_data)
+        except Exception:
+            logger.debug("Failed to compute peer comparison", exc_info=True)
+
+        # Related accounts
+        try:
+            if not device_accounts:
+                device_id = acc.device_id if acc else ""
+                device_accounts = [
+                    a for a in self._all_accounts
+                    if a.device_id == device_id and a.removed_at is None
+                ]
+            if acc_id is None:
+                acc_id = data.account.id if hasattr(data, "account") else getattr(data, "account_id", None)
+
+            related = []
+            for ra in device_accounts:
+                if ra.id == acc_id:
+                    continue
+                rh = AccountHealthService.compute_score(
+                    ra, self._fbr_map.get(ra.id), self._session_map.get(ra.id),
+                    self._source_count_map.get(ra.id, 0),
+                    self._op_tags_map.get(ra.id, "") or "",
+                    self._settings.get_min_source_count_warning(),
+                )
+                related.append({"username": ra.username, "health_score": rh})
+            related.sort(key=lambda x: x["health_score"])
+            self._detail_panel.load_related_accounts(related)
+        except Exception:
+            logger.debug("Failed to compute related accounts", exc_info=True)
 
     def _close_detail_panel(self) -> None:
         """Hide the detail panel and give full width back to the table."""
@@ -1209,6 +1392,36 @@ class MainWindow(QMainWindow):
         snap = self._fbr_map.get(acc.id) if acc.id is not None else None
         self._fill_fbr_cells(row, snap, dimmed=removed)
 
+        # Working hours
+        start_t = getattr(acc, "start_time", None) or ""
+        end_t = getattr(acc, "end_time", None) or ""
+        if start_t and end_t:
+            hours_text = f"{start_t}-{end_t}"
+        elif start_t:
+            hours_text = f"{start_t}-?"
+        else:
+            hours_text = "\u2014"
+        hours_item = QTableWidgetItem(hours_text)
+        hours_item.setTextAlignment(center)
+        if not start_t:
+            hours_item.setForeground(C_NEVER())
+        self._table.setItem(row, COL_HOURS, hours_item)
+
+        # Health score (snap already fetched above for FBR cells)
+        src_count_h = self._source_count_map.get(acc.id, 0) if acc.id is not None else 0
+        op_tags_h = self._op_tags_map.get(acc.id) if acc.id else None
+        min_src_th = self._settings.get_min_source_count_warning()
+        health = AccountHealthService.compute_score(
+            acc, snap, sess, src_count_h, op_tags_h or "", min_src_th,
+        )
+        health_item = _SortableItem(f"{health:.0f}", health)
+        health_item.setTextAlignment(center)
+        if removed:
+            health_item.setForeground(C_REMOVED())
+        else:
+            health_item.setForeground(sc(AccountHealthService.score_color_key(health)))
+        self._table.setItem(row, COL_HEALTH, health_item)
+
         self._table.item(row, COL_USERNAME).setData(
             Qt.ItemDataRole.UserRole, ("account", acc.id)
         )
@@ -1244,6 +1457,12 @@ class MainWindow(QMainWindow):
 
         # Orphans have no OH account_id — no FBR snapshot
         self._fill_fbr_cells(row, snap=None, dimmed=False)
+
+        # Hours — not available for orphans
+        self._table.setItem(row, COL_HOURS, self._make_item("—", center))
+
+        # Health — not available for orphans
+        self._table.setItem(row, COL_HEALTH, self._make_item("—", center))
 
         self._table.item(row, COL_USERNAME).setData(
             Qt.ItemDataRole.UserRole, ("orphan", disc)
@@ -1458,6 +1677,81 @@ class MainWindow(QMainWindow):
         else:
             msg += "  \u2014  Ready"
         self._set_status(msg)
+
+    # ------------------------------------------------------------------
+    # Update check
+    # ------------------------------------------------------------------
+
+    def _check_for_updates(self) -> None:
+        """Check for updates on startup (non-blocking)."""
+        enabled = self._settings.get("update_check_enabled")
+        if enabled != "1":
+            return
+
+        url = self._settings.get("update_check_url") or ""
+        if not url:
+            return
+
+        try:
+            from oh.services.update_service import UpdateService
+            svc = UpdateService(url)
+            info = svc.check_for_update()
+
+            if info is None:
+                return
+
+            # Check if user skipped this version
+            skipped = self._settings.get("update_skipped_version") or ""
+            if skipped == info.version:
+                logger.info("Update %s was skipped by user", info.version)
+                return
+
+            from oh.ui.update_dialog import UpdateDialog
+            dlg = UpdateDialog(self, svc, info)
+            result = dlg.exec()
+
+            if result == 2:  # skip
+                self._settings.set("update_skipped_version", info.version)
+
+        except Exception as exc:
+            logger.debug("Update check failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Auto-scan scheduler
+    # ------------------------------------------------------------------
+
+    def _setup_auto_scan(self) -> None:
+        """Configure auto-scan timer from settings."""
+        enabled = self._settings.get("auto_scan_enabled") == "1"
+        interval_h = int(self._settings.get("auto_scan_interval_hours") or "6")
+
+        if enabled and interval_h > 0:
+            interval_ms = interval_h * 3600 * 1000
+            self._auto_scan_timer.start(interval_ms)
+            logger.info("Auto-scan enabled: every %dh", interval_h)
+        else:
+            self._auto_scan_timer.stop()
+            logger.info("Auto-scan disabled")
+
+    def _on_auto_scan(self) -> None:
+        """Execute automatic scan & sync in background."""
+        bot_root = self._settings.get_bot_root()
+        if not bot_root:
+            logger.warning("Auto-scan skipped: no bot root configured")
+            return
+
+        # Skip if a manual scan is already running
+        if self._worker is not None:
+            logger.info("Auto-scan skipped: operation already in progress")
+            return
+
+        logger.info("Auto-scan triggered")
+        self._set_status("Auto-scan running\u2026")
+        try:
+            self._on_scan_and_sync()
+        except Exception as exc:
+            logger.warning("Auto-scan failed: %s", exc)
+            self._set_status(f"Auto-scan failed: {exc}")
 
     # ------------------------------------------------------------------
     # User actions — FBR batch flow
@@ -2061,6 +2355,40 @@ class MainWindow(QMainWindow):
         self._busy_label.setText(message if busy else "")
         if not busy:
             self._set_status("Ready.")
+
+    def _on_export_csv(self) -> None:
+        """Export visible (filtered) accounts table to CSV."""
+        import csv
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Accounts", "oh_accounts.csv",
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                # Header
+                headers = []
+                for col in range(self._table.columnCount()):
+                    hdr = self._table.horizontalHeaderItem(col)
+                    headers.append(hdr.text() if hdr else "Col%d" % col)
+                writer.writerow(headers)
+                # Rows (only visible)
+                for row in range(self._table.rowCount()):
+                    if self._table.isRowHidden(row):
+                        continue
+                    row_data = []
+                    for col in range(self._table.columnCount()):
+                        item = self._table.item(row, col)
+                        row_data.append(item.text() if item else "")
+                    writer.writerow(row_data)
+
+            self._set_status("Exported to %s" % path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Export Failed", "Failed to export CSV:\n\n%s" % exc)
 
     def _set_status(self, message: str) -> None:
         self._statusbar.showMessage(message)

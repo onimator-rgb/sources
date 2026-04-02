@@ -380,6 +380,154 @@ CREATE INDEX IF NOT EXISTS idx_source_results_search
 """
 
 # ---------------------------------------------------------------------------
+# Migration 009 — bulk discovery tables
+# ---------------------------------------------------------------------------
+
+_MIGRATION_009_SQL = """
+CREATE TABLE IF NOT EXISTS bulk_discovery_runs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at       TEXT    NOT NULL,
+    completed_at     TEXT,
+    status           TEXT    NOT NULL DEFAULT 'running',
+    min_threshold    INTEGER NOT NULL,
+    auto_add_top_n   INTEGER NOT NULL,
+    total_accounts   INTEGER NOT NULL DEFAULT 0,
+    accounts_done    INTEGER NOT NULL DEFAULT 0,
+    accounts_failed  INTEGER NOT NULL DEFAULT 0,
+    total_added      INTEGER NOT NULL DEFAULT 0,
+    machine          TEXT,
+    error_message    TEXT,
+    reverted_at      TEXT,
+    revert_status    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_bulk_runs_status
+    ON bulk_discovery_runs(status, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS bulk_discovery_items (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id                INTEGER NOT NULL REFERENCES bulk_discovery_runs(id),
+    account_id            INTEGER NOT NULL REFERENCES oh_accounts(id),
+    username              TEXT    NOT NULL,
+    device_id             TEXT    NOT NULL,
+    search_id             INTEGER REFERENCES source_searches(id),
+    sources_before        INTEGER NOT NULL DEFAULT 0,
+    sources_added         INTEGER NOT NULL DEFAULT 0,
+    sources_after         INTEGER NOT NULL DEFAULT 0,
+    status                TEXT    NOT NULL DEFAULT 'queued',
+    added_sources_json    TEXT,
+    original_sources_json TEXT,
+    error_message         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_bulk_items_run
+    ON bulk_discovery_items(run_id);
+
+CREATE INDEX IF NOT EXISTS idx_bulk_items_account
+    ON bulk_discovery_items(account_id)
+"""
+
+# ---------------------------------------------------------------------------
+# Migration 010 — smart source discovery: profiles, FBR stats, search columns
+# ---------------------------------------------------------------------------
+
+_MIGRATION_010_SQL = """
+CREATE TABLE IF NOT EXISTS source_profiles (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_name      TEXT    NOT NULL UNIQUE,
+    niche_category   TEXT,
+    niche_confidence REAL,
+    language         TEXT,
+    location         TEXT,
+    follower_count   INTEGER,
+    bio              TEXT,
+    avg_er           REAL,
+    is_active_source INTEGER NOT NULL DEFAULT 1,
+    first_seen_at    TEXT    NOT NULL,
+    updated_at       TEXT    NOT NULL,
+    profile_json     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_profiles_niche
+    ON source_profiles(niche_category);
+
+CREATE TABLE IF NOT EXISTS source_fbr_stats (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_name           TEXT    NOT NULL UNIQUE,
+    total_accounts_used   INTEGER NOT NULL DEFAULT 0,
+    total_follows         INTEGER NOT NULL DEFAULT 0,
+    total_followbacks     INTEGER NOT NULL DEFAULT 0,
+    avg_fbr_pct           REAL    NOT NULL DEFAULT 0.0,
+    weighted_fbr_pct      REAL    NOT NULL DEFAULT 0.0,
+    quality_account_count INTEGER NOT NULL DEFAULT 0,
+    last_analyzed_at      TEXT,
+    updated_at            TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_fbr_stats_name
+    ON source_fbr_stats(source_name);
+
+ALTER TABLE source_searches ADD COLUMN target_category TEXT;
+ALTER TABLE source_searches ADD COLUMN target_niche TEXT;
+ALTER TABLE source_searches ADD COLUMN target_bio TEXT;
+ALTER TABLE source_searches ADD COLUMN target_followers INTEGER;
+ALTER TABLE source_searches ADD COLUMN target_location TEXT;
+ALTER TABLE source_searches ADD COLUMN target_language TEXT;
+ALTER TABLE source_searches ADD COLUMN target_profile_json TEXT;
+
+ALTER TABLE source_search_candidates ADD COLUMN niche_category_local TEXT;
+ALTER TABLE source_search_candidates ADD COLUMN niche_match_score REAL;
+ALTER TABLE source_search_candidates ADD COLUMN composite_score REAL;
+ALTER TABLE source_search_candidates ADD COLUMN search_strategy TEXT;
+ALTER TABLE source_search_candidates ADD COLUMN language TEXT;
+ALTER TABLE source_search_candidates ADD COLUMN location TEXT
+"""
+
+# ---------------------------------------------------------------------------
+# Migration 011 — source blacklist + account operator notes
+# ---------------------------------------------------------------------------
+
+_MIGRATION_011_SQL = """
+CREATE TABLE IF NOT EXISTS source_blacklist (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_name TEXT    NOT NULL UNIQUE,
+    reason      TEXT,
+    added_at    TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_blacklist_name
+    ON source_blacklist(source_name);
+
+ALTER TABLE oh_accounts ADD COLUMN operator_notes TEXT
+"""
+
+# ---------------------------------------------------------------------------
+# Migration 012 — campaign templates
+# ---------------------------------------------------------------------------
+
+_MIGRATION_012_SQL = """
+CREATE TABLE IF NOT EXISTS campaign_templates (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL UNIQUE,
+    description     TEXT,
+    niche           TEXT,
+    language        TEXT    DEFAULT 'pl',
+    min_sources     INTEGER DEFAULT 10,
+    source_niche    TEXT,
+    follow_limit    INTEGER DEFAULT 200,
+    like_limit      INTEGER DEFAULT 100,
+    tb_level        INTEGER DEFAULT 1,
+    limits_level    INTEGER DEFAULT 1,
+    settings_json   TEXT,
+    created_at      TEXT    NOT NULL,
+    updated_at      TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_templates_niche
+    ON campaign_templates(niche)
+"""
+
+# ---------------------------------------------------------------------------
 # Registry — append new entries here, never modify existing ones
 # ---------------------------------------------------------------------------
 
@@ -392,6 +540,10 @@ _MIGRATIONS: List[Tuple[int, str, str]] = [
     (6, "session_and_tags",     _MIGRATION_006_SQL),
     (7, "operator_actions",     _MIGRATION_007_SQL),
     (8, "source_finder",        _MIGRATION_008_SQL),
+    (9, "bulk_discovery",       _MIGRATION_009_SQL),
+    (10, "smart_source_discovery", _MIGRATION_010_SQL),
+    (11, "blacklist_and_notes", _MIGRATION_011_SQL),
+    (12, "campaign_templates",  _MIGRATION_012_SQL),
 ]
 
 

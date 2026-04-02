@@ -392,8 +392,82 @@ class AccountAlertsTab(QScrollArea):
             )
             any_card = True
 
-        if not any_card:
+        # Auto-generate contextual cards based on account state
+        cards = []
+        if hasattr(data, "session") and data.session:
+            if data.session.follow_count == 0 and (data.session.follow_limit or 0) > 0:
+                cards.append({
+                    "title": "Follow is pending",
+                    "detail": "Account has follow limit set but 0 follows today",
+                    "color_key": "warning",
+                })
+        if hasattr(data, "source_count") and (data.source_count or 0) < 5:
+            cards.append({
+                "title": "Low source count",
+                "detail": "Only %d active sources" % (data.source_count or 0),
+                "color_key": "high",
+            })
+        if hasattr(data, "account") and getattr(data.account, "review_flag", 0):
+            cards.append({
+                "title": "Review flag active",
+                "detail": getattr(data.account, "review_note", "") or "Check this account",
+                "color_key": "medium",
+            })
+        if cards:
+            self.load_contextual_cards(cards)
+
+        if not any_card and not cards:
             return
+
+    def load_contextual_cards(self, cards: list) -> None:
+        """Show contextual action cards based on account state.
+
+        cards: list of dicts with 'title', 'detail', 'color_key'
+        """
+        if not cards:
+            return
+
+        header = QLabel("Contextual Insights")
+        header.setStyleSheet(
+            "font-size: 12px; font-weight: bold; color: %s; margin-top: 6px;"
+            % sc("heading").name()
+        )
+        self._layout.addWidget(header)
+
+        for card_data in cards:
+            title = card_data.get("title", "")
+            detail = card_data.get("detail", "")
+            color_key = card_data.get("color_key", "muted")
+
+            card = QFrame()
+            card.setFrameShape(QFrame.Shape.StyledPanel)
+            border_color = sc(color_key).name()
+            card.setStyleSheet(
+                "QFrame { border: 1px solid %s; border-left: 3px solid %s; }"
+                % (sc("border").name(), border_color)
+            )
+
+            lo = QVBoxLayout(card)
+            lo.setContentsMargins(8, 6, 8, 6)
+            lo.setSpacing(3)
+
+            title_label = QLabel(title)
+            title_label.setStyleSheet(
+                "font-size: 11px; font-weight: bold; color: %s; border: none;"
+                % sc("text").name()
+            )
+            title_label.setWordWrap(True)
+            lo.addWidget(title_label)
+
+            detail_label = QLabel(detail)
+            detail_label.setStyleSheet(
+                "font-size: 11px; color: %s; border: none;"
+                % sc("text_secondary").name()
+            )
+            detail_label.setWordWrap(True)
+            lo.addWidget(detail_label)
+
+            self._layout.addWidget(card)
 
     def _make_context_card(
         self,

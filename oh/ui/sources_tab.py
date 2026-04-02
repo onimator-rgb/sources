@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QLabel, QLineEdit, QSpinBox, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -23,8 +24,10 @@ from oh.models.source_usage import SourceUsageRecord
 from oh.modules.source_usage_reader import SourceUsageReader
 from oh.services.global_sources_service import GlobalSourcesService
 from oh.services.source_delete_service import SourceDeleteService
+from oh.services.source_trend_service import SourceTrendService
 from oh.ui.delete_confirm_dialog import DeleteConfirmDialog
 from oh.ui.delete_history_dialog import DeleteHistoryDialog
+from oh.ui.style import sc, BTN_HEIGHT_MD
 from oh.ui.workers import WorkerThread
 
 logger = logging.getLogger(__name__)
@@ -70,12 +73,12 @@ _DETAIL_HEADERS = [
 # Palette
 # ---------------------------------------------------------------------------
 
-_C_ACTIVE  = QColor("#4caf7d")
-_C_HIST    = QColor("#888888")
-_C_QUALITY = QColor("#4caf7d")
-_C_LOW     = QColor("#888888")
-_C_WARN    = QColor("#e6a817")
-_C_DIM     = QColor("#555555")
+def _c_active():  return sc("success")
+def _c_hist():    return sc("muted")
+def _c_quality(): return sc("success")
+def _c_low():     return sc("muted")
+def _c_warn():    return sc("warning")
+def _c_dim():     return sc("text_secondary")
 
 # ---------------------------------------------------------------------------
 # FBR quality filter values
@@ -117,11 +120,19 @@ class SourcesTab(QWidget):
         self,
         global_sources_service: GlobalSourcesService,
         source_delete_service: SourceDeleteService,
+        bulk_discovery_service=None,
+        settings_repo=None,
+        conn=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._service       = global_sources_service
         self._delete_svc    = source_delete_service
+        self._bulk_discovery_svc = bulk_discovery_service
+        self._settings_repo = settings_repo
+        self._trend_service: Optional[SourceTrendService] = (
+            SourceTrendService(conn) if conn is not None else None
+        )
         self._worker: Optional[WorkerThread] = None
         self._all_sources: list[GlobalSourceRecord] = []
         self._bot_root: Optional[str] = None
@@ -162,7 +173,7 @@ class SourcesTab(QWidget):
         lo.setSpacing(8)
 
         self._refresh_btn = QPushButton("⟳  Refresh Sources")
-        self._refresh_btn.setFixedHeight(32)
+        self._refresh_btn.setFixedHeight(BTN_HEIGHT_MD)
         self._refresh_btn.setToolTip(
             "Re-read sources.txt and data.db for all active accounts\n"
             "and update the source index.  Does not recompute FBR."
@@ -173,45 +184,66 @@ class SourcesTab(QWidget):
         lo.addSpacing(8)
 
         self._delete_btn = QPushButton("✕  Delete Source")
-        self._delete_btn.setFixedHeight(32)
+        self._delete_btn.setFixedHeight(BTN_HEIGHT_MD)
         self._delete_btn.setEnabled(False)
         self._delete_btn.setToolTip(
             "Remove the selected source from sources.txt for all active accounts.\n"
             "Requires a source to be selected in the table."
         )
         self._delete_btn.setStyleSheet(
-            "QPushButton:enabled { color: #e05555; }"
-            "QPushButton:enabled:hover { background: #3a1a1a; }"
+            f"QPushButton:enabled {{ color: {sc('error').name()}; }}"
+            f"QPushButton:enabled:hover {{ background: #3a1a1a; }}"
         )
         self._delete_btn.clicked.connect(self._on_delete_source)
         lo.addWidget(self._delete_btn)
 
         self._bulk_delete_btn = QPushButton("⚠  Bulk Delete Weak Sources")
-        self._bulk_delete_btn.setFixedHeight(32)
+        self._bulk_delete_btn.setFixedHeight(BTN_HEIGHT_MD)
         self._bulk_delete_btn.setToolTip(
             "Remove all sources whose weighted FBR is at or below the configured\n"
             "threshold from all active account assignments.\n"
             "Only sources with sufficient follow data are included."
         )
         self._bulk_delete_btn.setStyleSheet(
-            "QPushButton { color: #e6a817; }"
-            "QPushButton:hover { background: #2a2010; }"
+            f"QPushButton {{ color: {sc('warning').name()}; }}"
+            f"QPushButton:hover {{ background: #2a2010; }}"
         )
         self._bulk_delete_btn.clicked.connect(self._on_bulk_delete)
         lo.addWidget(self._bulk_delete_btn)
 
         self._history_btn = QPushButton("History")
-        self._history_btn.setFixedHeight(32)
+        self._history_btn.setFixedHeight(BTN_HEIGHT_MD)
         self._history_btn.setToolTip("View source deletion history.")
         self._history_btn.clicked.connect(self._on_show_history)
         lo.addWidget(self._history_btn)
 
+        lo.addSpacing(16)
+
+        self._bulk_find_btn = QPushButton("Bulk Find Sources")
+        self._bulk_find_btn.setFixedHeight(BTN_HEIGHT_MD)
+        self._bulk_find_btn.setToolTip(
+            "Discover and add similar profiles in bulk for all accounts\n"
+            "that have fewer active sources than the configured threshold."
+        )
+        self._bulk_find_btn.setStyleSheet(
+            f"QPushButton {{ color: {sc('link').name()}; }}"
+            f"QPushButton:hover {{ background: #1a2a3a; }}"
+        )
+        self._bulk_find_btn.clicked.connect(self._on_bulk_find_sources)
+        lo.addWidget(self._bulk_find_btn)
+
+        self._discovery_history_btn = QPushButton("Discovery History")
+        self._discovery_history_btn.setFixedHeight(BTN_HEIGHT_MD)
+        self._discovery_history_btn.setToolTip("View past bulk source discovery runs.")
+        self._discovery_history_btn.clicked.connect(self._on_show_discovery_history)
+        lo.addWidget(self._discovery_history_btn)
+
         self._busy_label = QLabel("")
-        self._busy_label.setStyleSheet("font-style: italic; color: #aaa;")
+        self._busy_label.setStyleSheet(f"font-style: italic; color: {sc('text_secondary').name()};")
         lo.addWidget(self._busy_label, stretch=1)
 
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("color: #777; font-size: 11px;")
+        self._status_label.setStyleSheet(f"color: {sc('muted').name()}; font-size: 11px;")
         lo.addWidget(self._status_label)
         return w
 
@@ -277,7 +309,7 @@ class SourcesTab(QWidget):
         lo.addStretch()
 
         self._count_label = QLabel("")
-        self._count_label.setStyleSheet("color: #777; font-size: 11px;")
+        self._count_label.setStyleSheet(f"color: {sc('muted').name()}; font-size: 11px;")
         lo.addWidget(self._count_label)
         return w
 
@@ -320,7 +352,7 @@ class SourcesTab(QWidget):
         self._detail_header = QLabel(
             "Select a source above to see which accounts use it."
         )
-        self._detail_header.setStyleSheet("color: #777; font-size: 11px; padding: 2px 4px;")
+        self._detail_header.setStyleSheet(f"color: {sc('muted').name()}; font-size: 11px; padding: 2px 4px;")
         lo.addWidget(self._detail_header)
 
         t = QTableWidget(0, len(_DETAIL_HEADERS))
@@ -439,7 +471,7 @@ class SourcesTab(QWidget):
                 )
             msg = QTableWidgetItem(msg_text)
             msg.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            msg.setForeground(QColor("#777777"))
+            msg.setForeground(sc("muted"))
             self._sources_table.setItem(0, 0, msg)
             self._sources_table.setSpan(0, 0, 1, len(_SOURCE_HEADERS))
             self._sources_table.setSortingEnabled(True)
@@ -448,6 +480,15 @@ class SourcesTab(QWidget):
 
         self._sources_table.setSpan(0, 0, 1, 1)
         center = Qt.AlignmentFlag.AlignCenter
+
+        # Fetch FBR trends (once for the whole table)
+        _trend_days = 14
+        trends: dict = {}
+        if self._trend_service is not None:
+            try:
+                trends = self._trend_service.get_source_trends(_trend_days)
+            except Exception:
+                logger.debug("Could not load source trends", exc_info=True)
 
         def _si(text: str, key, color: Optional[QColor] = None) -> _SortableItem:
             item = _SortableItem(text, key)
@@ -466,8 +507,8 @@ class SourcesTab(QWidget):
             self._sources_table.setItem(r, _COL_SOURCE, name_item)
 
             # Account counts
-            act_col = _C_ACTIVE if src.active_accounts > 0 else _C_DIM
-            hst_col = _C_HIST   if src.historical_accounts > 0 else _C_DIM
+            act_col = _c_active() if src.active_accounts > 0 else _c_dim()
+            hst_col = _c_hist()   if src.historical_accounts > 0 else _c_dim()
             self._sources_table.setItem(r, _COL_ACTIVE, _si(str(src.active_accounts),   src.active_accounts,   act_col))
             self._sources_table.setItem(r, _COL_HIST,   _si(str(src.historical_accounts), src.historical_accounts, hst_col))
             self._sources_table.setItem(r, _COL_TOTAL,  _si(str(src.total_accounts),    src.total_accounts))
@@ -478,31 +519,45 @@ class SourcesTab(QWidget):
 
             # Avg FBR %
             if src.avg_fbr_pct is not None:
-                avg_col = _C_QUALITY if src.avg_fbr_pct >= 10.0 else _C_LOW
+                avg_col = _c_quality() if src.avg_fbr_pct >= 10.0 else _c_low()
                 self._sources_table.setItem(r, _COL_AVG_FBR, _si(f"{src.avg_fbr_pct:.1f}%", src.avg_fbr_pct, avg_col))
             else:
-                self._sources_table.setItem(r, _COL_AVG_FBR, _si("—", -1.0, _C_DIM))
+                self._sources_table.setItem(r, _COL_AVG_FBR, _si("—", -1.0, _c_dim()))
 
             # Weighted FBR %
             if src.weighted_fbr_pct is not None:
-                wtd_col = _C_QUALITY if src.weighted_fbr_pct >= 10.0 else _C_LOW
-                self._sources_table.setItem(r, _COL_WTD_FBR, _si(f"{src.weighted_fbr_pct:.1f}%", src.weighted_fbr_pct, wtd_col))
+                wtd_col = _c_quality() if src.weighted_fbr_pct >= 10.0 else _c_low()
+                wfbr_item = _si(f"{src.weighted_fbr_pct:.1f}%", src.weighted_fbr_pct, wtd_col)
             else:
-                self._sources_table.setItem(r, _COL_WTD_FBR, _si("—", -1.0, _C_DIM))
+                wfbr_item = _si("—", -1.0, _c_dim())
+
+            # Apply trend tooltip to Wtd FBR cell
+            trend_info = trends.get(src.source_name)
+            if trend_info:
+                _arrow = {"up": "\u2191", "down": "\u2193", "stable": "\u2192", "new": "\u2605"}.get(
+                    trend_info["trend"], ""
+                )
+                wfbr_item.setToolTip(
+                    f"{_arrow} {trend_info['change_pct']:+.1f}% vs {_trend_days}d ago"
+                )
+                if trend_info["trend"] == "down":
+                    wfbr_item.setForeground(sc("error"))
+
+            self._sources_table.setItem(r, _COL_WTD_FBR, wfbr_item)
 
             # Quality: quality_count / total_accounts
             if src.total_accounts > 0:
                 q_text  = f"{src.quality_account_count}/{src.total_accounts}"
-                q_color = _C_QUALITY if src.quality_account_count > 0 else _C_LOW
+                q_color = _c_quality() if src.quality_account_count > 0 else _c_low()
             else:
                 q_text  = "—"
-                q_color = _C_DIM
+                q_color = _c_dim()
             self._sources_table.setItem(r, _COL_QUALITY, _si(q_text, src.quality_account_count, q_color))
 
             # Last updated
             date_str  = src.last_analyzed_at[:10] if src.last_analyzed_at else "—"
             date_sort = src.last_analyzed_at[:10] if src.last_analyzed_at else ""
-            self._sources_table.setItem(r, _COL_UPDATED, _si(date_str, date_sort, None if src.last_analyzed_at else _C_DIM))
+            self._sources_table.setItem(r, _COL_UPDATED, _si(date_str, date_sort, None if src.last_analyzed_at else _c_dim()))
 
         self._sources_table.setSortingEnabled(True)
         self._clear_detail_pane()
@@ -606,7 +661,7 @@ class SourcesTab(QWidget):
             self._detail_table.insertRow(0)
             msg = QTableWidgetItem("No account data available for this source.")
             msg.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            msg.setForeground(QColor("#777777"))
+            msg.setForeground(sc("muted"))
             self._detail_table.setItem(0, 0, msg)
             self._detail_table.setSpan(0, 0, 1, len(_DETAIL_HEADERS))
             self._detail_table.setSortingEnabled(True)
@@ -620,18 +675,18 @@ class SourcesTab(QWidget):
 
             # Username (left-aligned, coloured by assignment type)
             u_item = QTableWidgetItem(acc.username)
-            u_item.setForeground(_C_ACTIVE if acc.is_active else _C_HIST)
+            u_item.setForeground(_c_active() if acc.is_active else _c_hist())
             self._detail_table.setItem(r, _D_USERNAME, u_item)
 
             # Device
             d_item = QTableWidgetItem(acc.device_name)
             d_item.setTextAlignment(center)
-            d_item.setForeground(_C_DIM)
+            d_item.setForeground(_c_dim())
             self._detail_table.setItem(r, _D_DEVICE, d_item)
 
             # Assignment type
             asgn_text  = "Active" if acc.is_active else "Historical"
-            asgn_color = _C_ACTIVE if acc.is_active else _C_HIST
+            asgn_color = _c_active() if acc.is_active else _c_hist()
             a_item = QTableWidgetItem(asgn_text)
             a_item.setTextAlignment(center)
             a_item.setForeground(asgn_color)
@@ -643,19 +698,19 @@ class SourcesTab(QWidget):
 
             # FBR %
             if acc.fbr_percent is not None:
-                fbr_color = _C_QUALITY if acc.is_quality else _C_LOW
+                fbr_color = _c_quality() if acc.is_quality else _c_low()
                 self._detail_table.setItem(r, _D_FBR, _si(f"{acc.fbr_percent:.1f}%", acc.fbr_percent, fbr_color))
             else:
                 no_data = "—" if acc.last_analyzed_at else "Not analyzed"
-                self._detail_table.setItem(r, _D_FBR, _si(no_data, -1.0, _C_DIM))
+                self._detail_table.setItem(r, _D_FBR, _si(no_data, -1.0, _c_dim()))
 
             # Quality
             if acc.last_analyzed_at:
                 q_text  = "Yes" if acc.is_quality else "No"
-                q_color = _C_QUALITY if acc.is_quality else _C_LOW
+                q_color = _c_quality() if acc.is_quality else _c_low()
                 self._detail_table.setItem(r, _D_QUALITY, _si(q_text, 1 if acc.is_quality else 0, q_color))
             else:
-                self._detail_table.setItem(r, _D_QUALITY, _si("—", -1, _C_DIM))
+                self._detail_table.setItem(r, _D_QUALITY, _si("—", -1, _c_dim()))
 
             # Used — COUNT(*) from sources/{source_name}.db for this account
             urec = usage_recs.get(acc.account_id)
@@ -665,7 +720,7 @@ class SourcesTab(QWidget):
             else:
                 used_item = _SortableItem("—", -1)
                 used_item.setTextAlignment(center)
-                used_item.setForeground(_C_DIM)
+                used_item.setForeground(_c_dim())
             self._detail_table.setItem(r, _D_USED, used_item)
 
             # Used % — derived from .stm percent file + follows
@@ -680,7 +735,7 @@ class SourcesTab(QWidget):
             else:
                 pct_item = _SortableItem("—", -1.0)
                 pct_item.setTextAlignment(center)
-                pct_item.setForeground(_C_DIM)
+                pct_item.setForeground(_c_dim())
             self._detail_table.setItem(r, _D_USED_PCT, pct_item)
 
         self._detail_table.setSortingEnabled(True)
@@ -805,6 +860,70 @@ class SourcesTab(QWidget):
                 p._refresh_source_counts()
                 break
             p = p.parent() if hasattr(p, "parent") else None
+
+    # ------------------------------------------------------------------
+    # Bulk Source Discovery
+    # ------------------------------------------------------------------
+
+    def _on_bulk_find_sources(self) -> None:
+        """Open the Bulk Source Discovery wizard dialog."""
+        if self._bulk_discovery_svc is None:
+            return
+
+        if not self._bot_root:
+            QMessageBox.warning(
+                self, "Bot Root Not Set",
+                "Please set the Onimator installation path first.",
+            )
+            return
+
+        hiker_key = ""
+        if self._settings_repo is not None:
+            hiker_key = self._settings_repo.get("hiker_api_key") or ""
+        if not hiker_key:
+            QMessageBox.warning(
+                self, "API Key Required",
+                "HikerAPI key is not configured.\n\n"
+                "Go to Settings tab and enter your HikerAPI key "
+                "in the Source Finder section.",
+            )
+            return
+
+        min_threshold = 10
+        if self._settings_repo is not None:
+            min_threshold = int(self._settings_repo.get("min_source_for_bulk_discovery") or "10")
+
+        try:
+            qualifying = self._bulk_discovery_svc.get_qualifying_accounts(min_threshold)
+        except Exception as exc:
+            logger.error("Failed to get qualifying accounts: %s", exc)
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to load qualifying accounts:\n\n{exc}",
+            )
+            return
+
+        from oh.ui.bulk_discovery_dialog import BulkDiscoveryDialog
+        dlg = BulkDiscoveryDialog(
+            self,
+            self._bulk_discovery_svc,
+            qualifying,
+            self._settings_repo,
+        )
+        dlg.exec()
+        self.load_data()
+        self._request_accounts_refresh()
+
+    def _on_show_discovery_history(self) -> None:
+        """Open the Bulk Discovery History dialog."""
+        if self._bulk_discovery_svc is None:
+            return
+
+        from oh.ui.bulk_discovery_history_dialog import BulkDiscoveryHistoryDialog
+        dlg = BulkDiscoveryHistoryDialog(self, self._bulk_discovery_svc)
+        dlg.exec()
+        self.load_data()
+        self._request_accounts_refresh()
 
     # ------------------------------------------------------------------
     # Refresh (hits disk)

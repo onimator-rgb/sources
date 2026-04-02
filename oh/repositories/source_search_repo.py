@@ -263,6 +263,69 @@ class SourceSearchRepository:
         return [self._result_from_row(r) for r in rows]
 
     # ------------------------------------------------------------------
+    # Target & Niche data
+    # ------------------------------------------------------------------
+
+    def update_search_target_data(
+        self,
+        search_id: int,
+        target_category: Optional[str] = None,
+        target_niche: Optional[str] = None,
+        target_bio: Optional[str] = None,
+        target_followers: Optional[int] = None,
+        target_location: Optional[str] = None,
+        target_language: Optional[str] = None,
+        target_profile_json: Optional[str] = None,
+    ) -> None:
+        """Save target profile data on the search record."""
+        self._conn.execute(
+            """
+            UPDATE source_searches
+            SET target_category=?, target_niche=?, target_bio=?,
+                target_followers=?, target_location=?, target_language=?,
+                target_profile_json=?
+            WHERE id=?
+            """,
+            (target_category, target_niche, target_bio,
+             target_followers, target_location, target_language,
+             target_profile_json, search_id),
+        )
+        self._conn.commit()
+
+    def update_candidate_niche(
+        self,
+        candidate_id: int,
+        niche_category_local: Optional[str] = None,
+        niche_match_score: Optional[float] = None,
+        composite_score: Optional[float] = None,
+        search_strategy: Optional[str] = None,
+        language: Optional[str] = None,
+        location: Optional[str] = None,
+    ) -> None:
+        """Save niche classification and scoring data on a candidate."""
+        self._conn.execute(
+            """
+            UPDATE source_search_candidates
+            SET niche_category_local=?, niche_match_score=?, composite_score=?,
+                search_strategy=?, language=?, location=?
+            WHERE id=?
+            """,
+            (niche_category_local, niche_match_score, composite_score,
+             search_strategy, language, location, candidate_id),
+        )
+        self._conn.commit()
+
+    def update_candidate_composite_score(
+        self, candidate_id: int, composite_score: float
+    ) -> None:
+        """Update only the composite_score column for a candidate."""
+        self._conn.execute(
+            "UPDATE source_search_candidates SET composite_score=? WHERE id=?",
+            (composite_score, candidate_id),
+        )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 

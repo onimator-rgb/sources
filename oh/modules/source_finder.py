@@ -855,3 +855,65 @@ def quality_filter(
             len(candidates), len(filtered), removed, min_followers,
         )
     return filtered
+
+
+def build_niche_queries(
+    primary_query: str,
+    niche_name: str,
+    niche_keywords_pl: list,
+    niche_keywords_en: list,
+    related_niche_keywords: list,
+    city: str = "",
+) -> List[dict]:
+    """
+    Build multi-strategy search queries based on niche classification.
+
+    Returns a list of dicts, each with:
+      - "query": the search string
+      - "strategy": one of "niche_exact", "niche_broad", "related_niche", "keyword"
+
+    Generates 4-6 queries from different angles to maximize relevant results.
+    """
+    queries: List[dict] = []
+    seen: set = set()
+
+    def _add(query: str, strategy: str) -> None:
+        q = query.strip()
+        if q and q.lower() not in seen:
+            seen.add(q.lower())
+            queries.append({"query": q, "strategy": strategy})
+
+    # Strategy 1: Primary query (from AI or manual) with location
+    if primary_query:
+        _add(primary_query, "niche_exact")
+
+    # Strategy 2: Primary query without location
+    if primary_query and city:
+        no_city = primary_query.replace(city, "").strip()
+        if no_city and no_city.lower() != primary_query.lower():
+            _add(no_city, "niche_broad")
+
+    # Strategy 3: Top niche keywords with location
+    niche_kw = niche_keywords_pl[:2] if niche_keywords_pl else niche_keywords_en[:2]
+    if niche_kw and city:
+        _add(f"{niche_kw[0]} {city}", "niche_exact")
+
+    # Strategy 4: Niche broad (keyword only, no location)
+    if niche_kw:
+        _add(niche_kw[0], "niche_broad")
+        if len(niche_kw) > 1:
+            _add(f"{niche_kw[0]} {niche_kw[1]}", "niche_broad")
+
+    # Strategy 5: Related niche keywords with location
+    if related_niche_keywords and city:
+        _add(f"{related_niche_keywords[0]} {city}", "related_niche")
+    elif related_niche_keywords:
+        _add(related_niche_keywords[0], "related_niche")
+
+    # Strategy 6: English keyword variant (if primary is Polish)
+    en_kw = niche_keywords_en[:2] if niche_keywords_en else []
+    if en_kw:
+        _add(en_kw[0], "keyword")
+
+    # Cap at 6 queries max
+    return queries[:6]

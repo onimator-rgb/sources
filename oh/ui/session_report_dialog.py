@@ -716,6 +716,11 @@ class SessionReportDialog(QDialog):
                         i, QHeaderView.ResizeMode.ResizeToContents
                     )
 
+        if "Tags" in headers:
+            tags_idx = headers.index("Tags")
+            t.setColumnWidth(tags_idx, 100)
+            t.horizontalHeader().setSectionResizeMode(tags_idx, QHeaderView.ResizeMode.Fixed)
+
         t.setSortingEnabled(False)
         for r, row_data in enumerate(data):
             for c, val in enumerate(row_data):

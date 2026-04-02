@@ -17,6 +17,11 @@ _FONT_SIZE = "13px"
 _FONT_SIZE_SMALL = "11px"
 _FONT_SIZE_TOOLTIP = "12px"
 _BTN_MIN_HEIGHT = "32px"
+
+# Button height constants
+BTN_HEIGHT_SM = 28    # Compact/inline buttons
+BTN_HEIGHT_MD = 32    # Standard buttons
+BTN_HEIGHT_LG = 34    # Primary toolbar buttons
 _TAB_PADDING = "9px 22px"
 _CELL_PADDING = "6px 10px"
 _INPUT_PADDING = "6px 10px"

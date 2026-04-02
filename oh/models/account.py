@@ -46,6 +46,8 @@ class AccountRecord:
     bot_tags_raw: Optional[str] = None
     like_limit_perday: Optional[str] = None
     follow_limit_perday: Optional[str] = None
+    # --- Quick Wins fields (migration 011) ---
+    operator_notes: Optional[str] = None
 
     @property
     def is_active(self) -> bool:

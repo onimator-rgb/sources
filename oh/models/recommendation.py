@@ -16,6 +16,8 @@ REC_LOW_LIKE         = "LOW_LIKE"
 REC_LIMITS_MAX       = "LIMITS_MAX"
 REC_TB_MAX           = "TB_MAX"
 REC_ZERO_ACTION      = "ZERO_ACTION"
+REC_SOURCE_FBR_DECLINING = "source_fbr_declining"   # FBR dropped significantly
+REC_SOURCE_EXHAUSTED     = "source_exhausted"        # Source usage % very high
 
 # Severity constants (reused from session report pattern)
 SEV_CRITICAL = "CRITICAL"
@@ -44,6 +46,8 @@ REC_TYPE_LABELS = {
     REC_LIMITS_MAX:       "Limits Max",
     REC_TB_MAX:           "TB Max",
     REC_ZERO_ACTION:      "Zero Actions",
+    REC_SOURCE_FBR_DECLINING: "FBR Declining",
+    REC_SOURCE_EXHAUSTED:     "Source Exhausted",
 }
 
 

@@ -8,26 +8,40 @@ Groups:
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QGroupBox, QPushButton, QLabel, QDoubleSpinBox, QSpinBox, QComboBox,
-    QLineEdit,
+    QGroupBox, QPushButton, QLabel, QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox,
+    QLineEdit, QProgressBar, QMessageBox, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QHeaderView, QScrollArea,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 from oh.repositories.settings_repo import SettingsRepository
 from oh.ui.style import sc
 
 
 class SettingsTab(QWidget):
-    def __init__(self, settings_repo: SettingsRepository, parent=None) -> None:
+    settings_saved = Signal()
+
+    def __init__(self, settings_repo: SettingsRepository, source_finder_service=None, blacklist_repo=None, parent=None) -> None:
         super().__init__(parent)
         self._settings = settings_repo
+        self._source_finder_service = source_finder_service
+        self._blacklist_repo = blacklist_repo
+        self._index_worker = None  # WorkerThread for source indexing
         self._build_ui()
         self._load()
 
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        content = QWidget()
+        outer = QVBoxLayout(content)
         outer.setContentsMargins(20, 16, 20, 16)
-        outer.setSpacing(16)
+        outer.setSpacing(12)
 
         # -- FBR Analysis group --
         fbr_group = QGroupBox("FBR Analysis")
@@ -82,6 +96,84 @@ class SettingsTab(QWidget):
 
         outer.addWidget(sc_group)
 
+        # -- Source Discovery group --
+        sd_group = QGroupBox("Source Discovery")
+        sd_form  = QFormLayout(sd_group)
+        sd_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._bulk_min_src_spin = QSpinBox()
+        self._bulk_min_src_spin.setRange(1, 50)
+        self._bulk_min_src_spin.setFixedWidth(100)
+        self._bulk_min_src_spin.setToolTip(
+            "Accounts with fewer active sources than this will qualify for bulk source discovery."
+        )
+        sd_form.addRow("Min sources for bulk discovery:", self._bulk_min_src_spin)
+
+        self._bulk_top_n_spin = QSpinBox()
+        self._bulk_top_n_spin.setRange(1, 10)
+        self._bulk_top_n_spin.setFixedWidth(100)
+        self._bulk_top_n_spin.setToolTip(
+            "Number of top-ranked discovered profiles to auto-add per account."
+        )
+        sd_form.addRow("Auto-add top N results:", self._bulk_top_n_spin)
+
+        sd_hint = QLabel(
+            "Accounts with fewer active sources than the threshold will be included in bulk discovery."
+        )
+        sd_hint.setWordWrap(True)
+        sd_hint.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        sd_form.addRow("", sd_hint)
+
+        outer.addWidget(sd_group)
+
+        # -- Auto-Scan group --
+        auto_group = QGroupBox("Auto-Scan")
+        auto_form = QFormLayout(auto_group)
+        auto_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._auto_scan_check = QCheckBox("Enable automatic Scan && Sync")
+        self._auto_scan_check.setToolTip("Run Scan & Sync automatically at the configured interval")
+        auto_form.addRow("", self._auto_scan_check)
+
+        self._auto_scan_interval = QComboBox()
+        self._auto_scan_interval.addItems(["1", "2", "4", "6", "12", "24"])
+        self._auto_scan_interval.setFixedWidth(80)
+        self._auto_scan_interval.setToolTip("Hours between automatic scans")
+        auto_form.addRow("Interval (hours):", self._auto_scan_interval)
+
+        auto_hint = QLabel("Auto-scan runs Scan & Sync in the background. The timer resets on manual scan.")
+        auto_hint.setWordWrap(True)
+        auto_hint.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        auto_form.addRow("", auto_hint)
+
+        outer.addWidget(auto_group)
+
+        # -- Updates group --
+        upd_group = QGroupBox("Updates")
+        upd_form = QFormLayout(upd_group)
+        upd_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._update_check = QCheckBox("Check for updates on startup")
+        upd_form.addRow("", self._update_check)
+
+        self._update_url_edit = QLineEdit()
+        self._update_url_edit.setFixedWidth(400)
+        self._update_url_edit.setPlaceholderText("https://your-server.com/oh/update.json")
+        self._update_url_edit.setToolTip("URL to the update.json file on your server")
+        upd_form.addRow("Update URL:", self._update_url_edit)
+
+        upd_hint = QLabel("The update URL should point to a JSON file with version info and download link.")
+        upd_hint.setWordWrap(True)
+        upd_hint.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        upd_form.addRow("", upd_hint)
+
+        self._check_now_btn = QPushButton("Check Now")
+        self._check_now_btn.setFixedHeight(32)
+        self._check_now_btn.clicked.connect(self._on_check_update_now)
+        upd_form.addRow("", self._check_now_btn)
+
+        outer.addWidget(upd_group)
+
         # -- Appearance group --
         app_group = QGroupBox("Appearance")
         app_form  = QFormLayout(app_group)
@@ -125,6 +217,94 @@ class SettingsTab(QWidget):
 
         outer.addWidget(sf_group)
 
+        # -- Source Indexing group --
+        idx_group = QGroupBox("Source Indexing")
+        idx_lo = QVBoxLayout(idx_group)
+
+        idx_desc = QLabel(
+            "Scan all active sources from bot accounts and index them into the database.\n"
+            "This fetches profile data from HikerAPI and classifies each source by niche.\n"
+            "Sources already indexed will be skipped."
+        )
+        idx_desc.setWordWrap(True)
+        idx_desc.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        idx_lo.addWidget(idx_desc)
+
+        idx_btn_row = QHBoxLayout()
+        self._index_btn = QPushButton("Scan & Index Sources")
+        self._index_btn.setFixedHeight(32)
+        self._index_btn.setToolTip("Fetch profile data for all active sources and classify their niche")
+        self._index_btn.clicked.connect(self._on_index_sources)
+        idx_btn_row.addWidget(self._index_btn)
+
+        self._index_progress = QProgressBar()
+        self._index_progress.setFixedHeight(20)
+        self._index_progress.setVisible(False)
+        idx_btn_row.addWidget(self._index_progress, stretch=1)
+        idx_lo.addLayout(idx_btn_row)
+
+        self._index_status = QLabel("")
+        self._index_status.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        idx_lo.addWidget(self._index_status)
+
+        outer.addWidget(idx_group)
+
+        # -- Source Blacklist group --
+        bl_group = QGroupBox("Source Blacklist")
+        bl_lo = QVBoxLayout(bl_group)
+
+        bl_desc = QLabel("Sources in the blacklist will never be added during source discovery.")
+        bl_desc.setWordWrap(True)
+        bl_desc.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        bl_lo.addWidget(bl_desc)
+
+        bl_input_row = QHBoxLayout()
+        self._bl_input = QLineEdit()
+        self._bl_input.setPlaceholderText("Enter source username to blacklist...")
+        self._bl_input.setFixedHeight(28)
+        bl_input_row.addWidget(self._bl_input, stretch=1)
+
+        self._bl_add_btn = QPushButton("Add")
+        self._bl_add_btn.setFixedHeight(28)
+        self._bl_add_btn.clicked.connect(self._on_add_blacklist)
+        bl_input_row.addWidget(self._bl_add_btn)
+
+        self._bl_remove_btn = QPushButton("Remove Selected")
+        self._bl_remove_btn.setFixedHeight(28)
+        self._bl_remove_btn.clicked.connect(self._on_remove_blacklist)
+        bl_input_row.addWidget(self._bl_remove_btn)
+
+        bl_lo.addLayout(bl_input_row)
+
+        self._bl_list = QTableWidget(0, 3)
+        self._bl_list.setHorizontalHeaderLabels(["Source", "Reason", "Added"])
+        self._bl_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._bl_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._bl_list.setMaximumHeight(150)
+        self._bl_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        bl_lo.addWidget(self._bl_list)
+
+        self._bl_status = QLabel("")
+        self._bl_status.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        bl_lo.addWidget(self._bl_status)
+
+        outer.addWidget(bl_group)
+
+        # -- Campaign Templates group --
+        tpl_group = QGroupBox("Campaign Templates")
+        tpl_lo = QVBoxLayout(tpl_group)
+        tpl_desc = QLabel("Save and manage preset configurations for new client campaigns.")
+        tpl_desc.setWordWrap(True)
+        tpl_desc.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        tpl_lo.addWidget(tpl_desc)
+
+        self._templates_btn = QPushButton("Manage Templates")
+        self._templates_btn.setFixedHeight(32)
+        self._templates_btn.clicked.connect(self._on_manage_templates)
+        tpl_lo.addWidget(self._templates_btn)
+
+        outer.addWidget(tpl_group)
+
         # -- Save button --
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -140,6 +320,9 @@ class SettingsTab(QWidget):
 
         outer.addStretch()
 
+        scroll.setWidget(content)
+        root.addWidget(scroll)
+
     def _load(self) -> None:
         min_f, min_fbr = self._settings.get_fbr_thresholds()
         self._min_follows_spin.setValue(min_f)
@@ -150,8 +333,18 @@ class SettingsTab(QWidget):
         idx = self._theme_combo.findText(current_theme)
         if idx >= 0:
             self._theme_combo.setCurrentIndex(idx)
+        self._bulk_min_src_spin.setValue(int(self._settings.get("min_source_for_bulk_discovery") or "10"))
+        self._bulk_top_n_spin.setValue(int(self._settings.get("bulk_auto_add_top_n") or "5"))
+        self._auto_scan_check.setChecked(self._settings.get("auto_scan_enabled") == "1")
+        interval = self._settings.get("auto_scan_interval_hours") or "6"
+        idx = self._auto_scan_interval.findText(interval)
+        if idx >= 0:
+            self._auto_scan_interval.setCurrentIndex(idx)
         self._hiker_key_edit.setText(self._settings.get("hiker_api_key") or "")
         self._gemini_key_edit.setText(self._settings.get("gemini_api_key") or "")
+        self._update_check.setChecked(self._settings.get("update_check_enabled") == "1")
+        self._update_url_edit.setText(self._settings.get("update_check_url") or "")
+        self._load_blacklist()
 
     def _save(self) -> None:
         self._settings.set("min_follows_threshold",        str(self._min_follows_spin.value()))
@@ -159,8 +352,17 @@ class SettingsTab(QWidget):
         self._settings.set("weak_source_delete_threshold", str(self._delete_thresh_spin.value()))
         self._settings.set("min_source_count_warning",     str(self._min_src_spin.value()))
 
+        self._settings.set("min_source_for_bulk_discovery", str(self._bulk_min_src_spin.value()))
+        self._settings.set("bulk_auto_add_top_n", str(self._bulk_top_n_spin.value()))
+
+        self._settings.set("auto_scan_enabled", "1" if self._auto_scan_check.isChecked() else "0")
+        self._settings.set("auto_scan_interval_hours", self._auto_scan_interval.currentText())
+
         self._settings.set("hiker_api_key",  self._hiker_key_edit.text().strip())
         self._settings.set("gemini_api_key", self._gemini_key_edit.text().strip())
+
+        self._settings.set("update_check_enabled", "1" if self._update_check.isChecked() else "0")
+        self._settings.set("update_check_url", self._update_url_edit.text().strip())
 
         new_theme = self._theme_combo.currentText()
         old_theme = self._settings.get("theme") or "dark"
@@ -172,3 +374,143 @@ class SettingsTab(QWidget):
             )
         else:
             self._status_label.setText("Settings saved.")
+
+        self.settings_saved.emit()
+
+    def _on_index_sources(self) -> None:
+        """Start scanning and indexing all active sources."""
+        if self._source_finder_service is None:
+            QMessageBox.warning(self, "Not Available", "Source finder service not initialized.")
+            return
+
+        hiker_key = self._settings.get("hiker_api_key") or ""
+        if not hiker_key:
+            QMessageBox.warning(
+                self, "API Key Required",
+                "HikerAPI key is not configured.\nEnter it above and save first.",
+            )
+            return
+
+        bot_root = self._settings.get("bot_root_path") or ""
+        if not bot_root:
+            QMessageBox.warning(self, "Bot Root Not Set", "Set the Onimator path first.")
+            return
+
+        self._index_btn.setEnabled(False)
+        self._index_btn.setText("Scanning...")
+        self._index_progress.setVisible(True)
+        self._index_progress.setRange(0, 0)  # indeterminate initially
+        self._index_status.setText("Starting source scan...")
+
+        from oh.ui.workers import WorkerThread
+        self._index_worker = WorkerThread(
+            self._source_finder_service.scan_and_index_sources,
+            bot_root,
+        )
+        self._index_worker.result.connect(self._on_index_complete)
+        self._index_worker.error.connect(self._on_index_error)
+        self._index_worker.start()
+
+    def _on_index_complete(self, result) -> None:
+        """Handle source indexing completion."""
+        self._index_btn.setEnabled(True)
+        self._index_btn.setText("Scan & Index Sources")
+        self._index_progress.setVisible(False)
+        self._index_worker = None
+
+        indexed, skipped, failed, errors = result
+        total = indexed + skipped + failed
+        msg = f"Done: {indexed} indexed, {skipped} already known, {failed} failed (of {total} sources)"
+        self._index_status.setText(msg)
+
+        if errors:
+            detail = "\n".join(errors[:10])
+            if len(errors) > 10:
+                detail += f"\n... and {len(errors) - 10} more"
+            QMessageBox.information(
+                self, "Source Indexing Complete",
+                f"{msg}\n\nErrors:\n{detail}",
+            )
+        else:
+            QMessageBox.information(self, "Source Indexing Complete", msg)
+
+    def _on_index_error(self, error_msg: str) -> None:
+        """Handle source indexing error."""
+        self._index_btn.setEnabled(True)
+        self._index_btn.setText("Scan & Index Sources")
+        self._index_progress.setVisible(False)
+        self._index_worker = None
+        self._index_status.setText(f"Error: {error_msg}")
+        QMessageBox.critical(self, "Indexing Failed", f"Source indexing failed:\n\n{error_msg}")
+
+    # ------------------------------------------------------------------
+    # Update Check
+    # ------------------------------------------------------------------
+
+    def _on_check_update_now(self) -> None:
+        url = self._update_url_edit.text().strip()
+        if not url:
+            QMessageBox.warning(self, "No URL", "Enter an update URL first.")
+            return
+
+        from oh.services.update_service import UpdateService
+        svc = UpdateService(url)
+        info = svc.check_for_update()
+
+        if info:
+            from oh.ui.update_dialog import UpdateDialog
+            dlg = UpdateDialog(self, svc, info)
+            dlg.exec()
+        else:
+            QMessageBox.information(
+                self, "No Update",
+                f"You are running the latest version ({svc.current_version}).",
+            )
+
+    # ------------------------------------------------------------------
+    # Campaign Templates
+    # ------------------------------------------------------------------
+
+    def _on_manage_templates(self) -> None:
+        from oh.ui.campaign_templates_dialog import CampaignTemplatesDialog
+        from oh.repositories.campaign_template_repo import CampaignTemplateRepository
+        conn = self._settings._conn
+        repo = CampaignTemplateRepository(conn)
+        dlg = CampaignTemplatesDialog(repo, parent=self)
+        dlg.exec()
+
+    # ------------------------------------------------------------------
+    # Source Blacklist
+    # ------------------------------------------------------------------
+
+    def _on_add_blacklist(self) -> None:
+        name = self._bl_input.text().strip()
+        if not name or self._blacklist_repo is None:
+            return
+        self._blacklist_repo.add(name)
+        self._bl_input.clear()
+        self._load_blacklist()
+
+    def _on_remove_blacklist(self) -> None:
+        if self._blacklist_repo is None:
+            return
+        selected = self._bl_list.selectedItems()
+        if not selected:
+            return
+        row = selected[0].row()
+        name_item = self._bl_list.item(row, 0)
+        if name_item:
+            self._blacklist_repo.remove(name_item.text())
+            self._load_blacklist()
+
+    def _load_blacklist(self) -> None:
+        if self._blacklist_repo is None:
+            self._bl_status.setText("Blacklist not available")
+            return
+        items = self._blacklist_repo.get_all()
+        self._bl_list.setRowCount(len(items))
+        for i, item in enumerate(items):
+            self._bl_list.setItem(i, 0, QTableWidgetItem(item["source_name"]))
+            self._bl_list.setItem(i, 1, QTableWidgetItem(item.get("reason", "")))
+            self._bl_list.setItem(i, 2, QTableWidgetItem(item.get("added_at", "")[:10]))
+        self._bl_status.setText(f"{len(items)} sources blacklisted")

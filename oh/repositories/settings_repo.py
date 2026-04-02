@@ -20,6 +20,13 @@ _CONFIG_DEFAULTS = [
     ("min_source_count_warning",     "5",     "Warn if an account has fewer active sources than this"),
     ("hiker_api_key",               "",      "HikerAPI access key for Instagram data"),
     ("gemini_api_key",              "",      "Google Gemini API key for AI scoring"),
+    ("min_source_for_bulk_discovery", "10",  "Minimum active sources — accounts below this qualify for bulk discovery"),
+    ("bulk_auto_add_top_n",          "5",   "How many top results to auto-add per account in bulk discovery"),
+    ("auto_scan_enabled",            "0",   "Enable automatic periodic Scan & Sync"),
+    ("auto_scan_interval_hours",     "6",   "Hours between automatic scans"),
+    ("update_check_url",             "https://raw.githubusercontent.com/onimator-rgb/oh-releases/main/update.json",    "URL to check for OH updates (JSON endpoint)"),
+    ("update_check_enabled",         "1",   "Enable automatic update checking on startup"),
+    ("update_skipped_version",       "",    "Version that was skipped by user"),
 ]
 
 

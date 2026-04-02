@@ -1,14 +1,14 @@
 """
 SourceFinderService — orchestrates the multi-step source discovery pipeline.
 
-Pipeline:
-  1. Profile fetch → save query
-  2. Collect candidates (suggested + 5x search) → save to DB
+Pipeline (Smart Discovery v2):
+  1. Profile fetch → classify niche → generate multi-strategy queries
+  2. Multi-strategy search (niche exact/broad/related + suggested)
   3. Pre-filter (remove private, verified)
-  4. Enrich top 25 (full profile data)
+  4. Enrich top 25 + niche classification + quality gate
   5. Fetch posts + compute ER for top 10
-  6. AI scoring (optional, graceful skip)
-  7. Rank + save top 10 results
+  6. AI scoring (optional, enhanced niche-aware prompt)
+  7. Composite ranking (niche match + AI + ER + strategy bonus) + quality gate
 
 Resume: if a running search exists (started < 1h ago), resumes from
 step_reached + 1. Otherwise creates a new search.
@@ -16,10 +16,12 @@ step_reached + 1. Otherwise creates a new search.
 Secondary: add_to_sources() appends a result username to sources.txt
 with backup-first safety (same pattern as SourceDeleter).
 """
+import json
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from oh.models.source_finder import (
     SourceCandidate,
@@ -29,12 +31,20 @@ from oh.models.source_finder import (
     SEARCH_FAILED,
     SEARCH_RUNNING,
 )
+from oh.modules.niche_classifier import (
+    classify_profile,
+    compute_niche_match,
+    detect_language,
+    NicheResult,
+    NICHE_TAXONOMY,
+)
 from oh.modules.source_finder import (
     HikerClient,
     GeminiScorer,
     HikerAPIError,
     build_manual_query,
     build_query_variations,
+    build_niche_queries,
     compute_avg_er,
     pre_filter,
     quality_filter,
@@ -54,6 +64,10 @@ _POST_FETCH_LIMIT = 10
 _FINAL_TOP_N = 10
 _MIN_FOLLOWERS_QUALITY = 1000
 
+# Quality gate thresholds (reject off-topic candidates)
+_NICHE_MATCH_MIN = 20       # minimum niche match score to keep candidate
+_COMPOSITE_MIN = 30         # minimum composite score for final results
+
 
 class SourceFinderService:
     """
@@ -71,10 +85,12 @@ class SourceFinderService:
         search_repo: SourceSearchRepository,
         account_repo: AccountRepository,
         settings_repo: SettingsRepository,
+        source_profile_repo=None,
     ) -> None:
         self._search_repo = search_repo
         self._account_repo = account_repo
         self._settings = settings_repo
+        self._profile_repo = source_profile_repo
 
         # Recover stale searches from previous crash / interrupted runs
         self._search_repo.recover_stale_searches(max_age_hours=24)
@@ -87,6 +103,178 @@ class SourceFinderService:
         """Return the query_used from the most recent search for an account."""
         search = self._search_repo.get_latest_search(account_id)
         return search.query_used if search else None
+
+    # ------------------------------------------------------------------
+    # Source indexing: scan all active sources into source_profiles
+    # ------------------------------------------------------------------
+
+    def scan_and_index_sources(
+        self,
+        bot_root: str,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Tuple[int, int, int, List[str]]:
+        """
+        Scan all active sources across all accounts and index missing ones
+        into source_profiles via HikerAPI + NicheClassifier.
+
+        Args:
+            bot_root: path to bot directory (unused here but kept for API consistency)
+            progress_callback: optional (current, total, message) callback
+            cancel_check: optional callable returning True if cancelled
+
+        Returns:
+            (indexed_count, skipped_count, failed_count, errors)
+            - indexed: new profiles added to source_profiles
+            - skipped: already existed in source_profiles
+            - failed: HikerAPI or other errors
+        """
+        if self._profile_repo is None:
+            return (0, 0, 0, ["Source profile repository not configured"])
+
+        # 1. Get all unique active source names
+        try:
+            rows = self._search_repo._conn.execute(
+                "SELECT DISTINCT source_name FROM source_assignments WHERE is_active = 1"
+            ).fetchall()
+            source_names: List[str] = [r[0] if isinstance(r, tuple) else r["source_name"] for r in rows]
+        except Exception as exc:
+            logger.error("Failed to query active source names: %s", exc)
+            return (0, 0, 0, [f"Failed to query active source names: {exc}"])
+
+        total = len(source_names)
+        if total == 0:
+            logger.info("scan_and_index_sources: no active sources found")
+            return (0, 0, 0, [])
+
+        indexed = 0
+        skipped = 0
+        failed = 0
+        errors: List[str] = []
+
+        hiker: Optional[HikerClient] = None
+
+        for i, source_name in enumerate(source_names):
+            # Cancel check
+            if cancel_check is not None and cancel_check():
+                logger.info("scan_and_index_sources cancelled at %d/%d", i, total)
+                return (indexed, skipped, failed, errors)
+
+            # Progress callback
+            if progress_callback is not None:
+                progress_callback(i, total, f"Indexing @{source_name}...")
+
+            # 2. Check if already in source_profiles
+            try:
+                existing = self._profile_repo.get_profile(source_name)
+                if existing is not None:
+                    skipped += 1
+                    continue
+            except Exception as exc:
+                logger.warning(
+                    "Error checking profile for @%s: %s", source_name, exc,
+                )
+                # Continue to try fetching anyway
+
+            # 3. Fetch profile via HikerAPI
+            if hiker is None:
+                try:
+                    hiker = self._ensure_hiker()
+                except HikerAPIError as exc:
+                    msg = f"HikerAPI not available: {exc}"
+                    logger.error(msg)
+                    errors.append(msg)
+                    return (indexed, skipped, failed, errors)
+
+            try:
+                profile_data = hiker.get_profile(source_name)
+            except HikerAPIError as exc:
+                logger.warning(
+                    "HikerAPI error for @%s: %s", source_name, exc,
+                )
+                failed += 1
+                errors.append(f"@{source_name}: {exc}")
+                time.sleep(0.5)
+                continue
+            except Exception as exc:
+                logger.warning(
+                    "Unexpected error fetching @%s: %s", source_name, exc,
+                )
+                failed += 1
+                errors.append(f"@{source_name}: {exc}")
+                time.sleep(0.5)
+                continue
+
+            # 4. Classify with NicheClassifier
+            try:
+                bio = profile_data.get("biography", "") or ""
+                category = profile_data.get("category", "") or ""
+                full_name = profile_data.get("full_name", "") or ""
+                niche_result = classify_profile(bio, category, full_name, source_name)
+            except Exception as exc:
+                logger.warning(
+                    "Niche classification failed for @%s: %s", source_name, exc,
+                )
+                failed += 1
+                errors.append(f"@{source_name}: classification error: {exc}")
+                time.sleep(0.5)
+                continue
+
+            # 5. Save to source_profiles
+            try:
+                follower_count = int(profile_data.get("follower_count", 0) or 0)
+                location = profile_data.get("city_name", "") or None
+                profile_json_data = {
+                    "username": profile_data.get("username", source_name),
+                    "full_name": full_name,
+                    "category": category,
+                    "city_name": profile_data.get("city_name", ""),
+                    "follower_count": follower_count,
+                    "following_count": int(profile_data.get("following_count", 0) or 0),
+                    "media_count": int(profile_data.get("media_count", 0) or 0),
+                    "is_private": profile_data.get("is_private", False),
+                    "is_verified": profile_data.get("is_verified", False),
+                    "niche": niche_result.primary_niche,
+                    "niche_confidence": niche_result.confidence,
+                }
+
+                self._profile_repo.upsert_profile(
+                    source_name=source_name,
+                    niche_category=niche_result.primary_niche,
+                    niche_confidence=niche_result.confidence,
+                    language=niche_result.language,
+                    location=location,
+                    follower_count=follower_count,
+                    bio=bio[:500] if bio else None,
+                    avg_er=None,
+                    profile_json=json.dumps(profile_json_data),
+                )
+                indexed += 1
+                logger.debug(
+                    "Indexed @%s: niche=%s (%.0f%%), followers=%d",
+                    source_name, niche_result.primary_niche,
+                    niche_result.confidence * 100, follower_count,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to save profile for @%s: %s", source_name, exc,
+                )
+                failed += 1
+                errors.append(f"@{source_name}: save error: {exc}")
+
+            # 6. Rate limiting
+            time.sleep(0.5)
+
+        # Final progress callback
+        if progress_callback is not None:
+            progress_callback(total, total, "Indexing complete")
+
+        logger.info(
+            "scan_and_index_sources complete: indexed=%d, skipped=%d, "
+            "failed=%d, total=%d",
+            indexed, skipped, failed, total,
+        )
+        return (indexed, skipped, failed, errors)
 
     # ------------------------------------------------------------------
     # Primary: run_search
@@ -142,9 +330,11 @@ class SourceFinderService:
         hiker: Optional[HikerClient] = None
         profile_data: Optional[dict] = None
         query: Optional[str] = search.query_used
+        target_niche: Optional[NicheResult] = None
+        search_queries: List[dict] = []  # [{"query": str, "strategy": str}]
 
         try:
-            # ── Step 1 — Profile fetch ───────────────────────────────
+            # ── Step 1 — Profile Intelligence ────────────────────────
             if start_step <= 1:
                 if _check_cancelled(search_id):
                     return []
@@ -158,7 +348,18 @@ class SourceFinderService:
 
                 profile_data = hiker.get_profile(account.username)
 
-                # Build query — try Gemini first, fall back to manual
+                # 1a. Classify target niche (local, no API call)
+                bio = profile_data.get("biography", "") or ""
+                category = profile_data.get("category", "") or ""
+                full_name = profile_data.get("full_name", "") or ""
+                city = profile_data.get("city_name", "") or ""
+                target_niche = classify_profile(
+                    bio, category, full_name, account.username,
+                )
+                _progress(7, f"Niche: {target_niche.display_name} "
+                             f"({target_niche.confidence:.0%})")
+
+                # 1b. Build query — try Gemini first, fall back to manual
                 gemini_key = self._settings.get("gemini_api_key") or ""
                 scorer = GeminiScorer(gemini_key)
                 if scorer.is_available:
@@ -166,17 +367,69 @@ class SourceFinderService:
                 if not query:
                     query = build_manual_query(profile_data)
 
-                # Persist query on the search record
+                # 1c. Build multi-strategy search queries
+                niche_def = NICHE_TAXONOMY.get(target_niche.primary_niche)
+                if niche_def is not None:
+                    # Gather related niche keywords
+                    related_kw: List[str] = []
+                    for rn in niche_def.related_niches:
+                        rd = NICHE_TAXONOMY.get(rn)
+                        if rd is not None:
+                            lang = target_niche.language
+                            kw_list = rd.keywords_pl if lang == "pl" else rd.keywords_en
+                            related_kw.extend(kw_list[:2])
+
+                    search_queries = build_niche_queries(
+                        primary_query=query,
+                        niche_name=niche_def.name,
+                        niche_keywords_pl=niche_def.keywords_pl,
+                        niche_keywords_en=niche_def.keywords_en,
+                        related_niche_keywords=related_kw,
+                        city=city,
+                    )
+                else:
+                    # Fallback to old variation strategy
+                    search_queries = [
+                        {"query": q, "strategy": "keyword"}
+                        for q in build_query_variations(query)
+                    ]
+
+                # 1d. Persist query and target data
                 self._search_repo.update_search_query(search_id, query)
+                try:
+                    self._search_repo.update_search_target_data(
+                        search_id,
+                        target_category=category,
+                        target_niche=target_niche.primary_niche,
+                        target_bio=bio[:500],
+                        target_followers=int(profile_data.get("follower_count", 0) or 0),
+                        target_location=city,
+                        target_language=target_niche.language,
+                        target_profile_json=json.dumps({
+                            "username": account.username,
+                            "full_name": full_name,
+                            "category": category,
+                            "city_name": city,
+                            "follower_count": int(profile_data.get("follower_count", 0) or 0),
+                            "niche": target_niche.primary_niche,
+                            "niche_confidence": target_niche.confidence,
+                        }),
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to save target data: %s", exc)
 
                 self._search_repo.update_search_step(search_id, 1)
-                _progress(10, f"Profile fetched. Query: {query}")
+                strategies_str = ", ".join(q["strategy"] for q in search_queries)
+                _progress(10, f"Niche: {target_niche.display_name}. "
+                              f"Query: {query}. Strategies: {strategies_str}")
                 logger.info(
-                    "Step 1 complete: profile fetched for @%s, query=%r",
-                    account.username, query,
+                    "Step 1 complete: @%s classified as %s (%.0f%%), "
+                    "query=%r, %d search strategies",
+                    account.username, target_niche.primary_niche,
+                    target_niche.confidence * 100, query, len(search_queries),
                 )
 
-            # ── Step 2 — Collect candidates ──────────────────────────
+            # ── Step 2 — Multi-Strategy Search ──────────────────────
             if start_step <= 2:
                 if _check_cancelled(search_id):
                     return []
@@ -194,32 +447,46 @@ class SourceFinderService:
                 # A. Suggested profiles
                 raw_candidates = hiker.get_suggested_profiles(user_id)
 
-                # B. Search with query variations
-                if not query:
-                    query = build_manual_query(profile_data)
-                variations = build_query_variations(query)
+                # B. Multi-strategy search
+                if not search_queries:
+                    # Fallback if resuming: use old variation strategy
+                    if not query:
+                        query = build_manual_query(profile_data)
+                    search_queries = [
+                        {"query": q, "strategy": "keyword"}
+                        for q in build_query_variations(query)
+                    ]
+
                 search_results_raw: List[dict] = []
-                for var in variations:
-                    search_results_raw.extend(hiker.search_accounts(var))
+                strategy_map: Dict[str, str] = {}  # username.lower() -> strategy
+                for sq in search_queries:
+                    results = hiker.search_accounts(sq["query"])
+                    for r in results:
+                        uname = (r.get("username") or "").lower()
+                        if uname and uname not in strategy_map:
+                            strategy_map[uname] = sq["strategy"]
+                    search_results_raw.extend(results)
 
                 # Deduplicate by username (case-insensitive), mark source_type
                 seen_lower: set = set()
                 deduped: List[dict] = []
 
-                # Suggested first
+                # Suggested first (highest trust)
                 for c in raw_candidates:
                     uname = (c.get("username") or "").lower()
                     if uname and uname not in seen_lower:
                         seen_lower.add(uname)
                         c["_source_type"] = "suggested"
+                        c["_search_strategy"] = "suggested"
                         deduped.append(c)
 
-                # Search results second
+                # Search results second (tagged with strategy)
                 for c in search_results_raw:
                     uname = (c.get("username") or "").lower()
                     if uname and uname not in seen_lower:
                         seen_lower.add(uname)
                         c["_source_type"] = "search"
+                        c["_search_strategy"] = strategy_map.get(uname, "keyword")
                         deduped.append(c)
 
                 # Remove the target itself
@@ -241,6 +508,11 @@ class SourceFinderService:
                     )
                     for c in deduped
                 ]
+                # Track strategies for later DB update
+                _strategy_by_username = {
+                    c.get("username", "").lower(): c.get("_search_strategy", "keyword")
+                    for c in deduped
+                }
 
                 self._search_repo.save_candidates(search_id, candidates)
                 # Reload with IDs
@@ -329,11 +601,67 @@ class SourceFinderService:
                     if c.username.lower() in quality_usernames
                 ]
 
+                # 4b. Niche classification + match scoring for each candidate
+                if target_niche is None:
+                    # Reconstruct target niche on resume
+                    if profile_data is None:
+                        account = self._account_repo.get_by_id(account_id)
+                        if hiker is None:
+                            hiker = self._ensure_hiker()
+                        profile_data = hiker.get_profile(account.username)
+                    target_niche = classify_profile(
+                        profile_data.get("biography", "") or "",
+                        profile_data.get("category", "") or "",
+                        profile_data.get("full_name", "") or "",
+                        search.username,
+                    )
+
+                niche_rejected = 0
+                for cand in candidates:
+                    cand_bio = cand.bio or ""
+                    cand_full = cand.full_name or ""
+                    # Classify candidate
+                    cand_niche = classify_profile(
+                        cand_bio, "", cand_full, cand.username,
+                    )
+                    # Compute match score
+                    match_score = compute_niche_match(
+                        target_niche, cand_bio, "", cand_full, cand.username,
+                    )
+                    # Persist niche data
+                    try:
+                        strategy = getattr(cand, '_search_strategy', None)
+                        if strategy is None and hasattr(self, '_strategy_by_username'):
+                            strategy = self._strategy_by_username.get(
+                                cand.username.lower(), "keyword")
+                        self._search_repo.update_candidate_niche(
+                            cand.id,
+                            niche_category_local=cand_niche.primary_niche,
+                            niche_match_score=match_score,
+                            search_strategy=strategy,
+                            language=cand_niche.language,
+                        )
+                    except Exception as exc:
+                        logger.debug("Niche update failed for %s: %s", cand.username, exc)
+
+                # 4c. Quality gate: reject candidates with low niche match
+                before_gate = len(candidates)
+                candidates = [
+                    c for c in candidates
+                    if compute_niche_match(
+                        target_niche,
+                        c.bio or "", "", c.full_name or "", c.username,
+                    ) >= _NICHE_MATCH_MIN
+                ]
+                niche_rejected = before_gate - len(candidates)
+
                 self._search_repo.update_search_step(search_id, 4)
-                _progress(55, f"{len(candidates)} quality candidates")
+                _progress(55, f"{len(candidates)} quality candidates "
+                              f"({niche_rejected} rejected by niche gate)")
                 logger.info(
-                    "Step 4 complete: %d quality candidates after enrichment",
-                    len(candidates),
+                    "Step 4 complete: %d quality candidates after enrichment "
+                    "(%d rejected by niche gate)",
+                    len(candidates), niche_rejected,
                 )
 
             # ── Step 5 — Fetch posts + compute ER ────────────────────
@@ -434,27 +762,58 @@ class SourceFinderService:
                 self._search_repo.update_search_step(search_id, 6)
                 _progress(85, "AI scoring complete")
 
-            # ── Step 7 — Rank and finalize ───────────────────────────
+            # ── Step 7 — Composite Ranking + Quality Gate ────────────
             if start_step <= 7:
                 if _check_cancelled(search_id):
                     return []
-                _progress(90, "Ranking and finalizing results...")
+                _progress(90, "Computing composite scores and ranking...")
 
                 if not candidates:
                     candidates = self._search_repo.get_candidates(search_id)
 
-                # Sort: by ai_score desc if available, then follower_count desc
-                has_ai = any(c.ai_score is not None for c in candidates)
-                if has_ai:
-                    candidates.sort(
-                        key=lambda c: (
-                            c.ai_score if c.ai_score is not None else -1,
-                            c.follower_count,
-                        ),
-                        reverse=True,
+                # Reconstruct target niche if needed
+                if target_niche is None:
+                    if profile_data is None:
+                        account = self._account_repo.get_by_id(account_id)
+                        if hiker is None:
+                            hiker = self._ensure_hiker()
+                        profile_data = hiker.get_profile(account.username)
+                    target_niche = classify_profile(
+                        profile_data.get("biography", "") or "",
+                        profile_data.get("category", "") or "",
+                        profile_data.get("full_name", "") or "",
+                        search.username,
                     )
-                else:
-                    candidates.sort(key=lambda c: c.follower_count, reverse=True)
+
+                # Compute composite score for each candidate
+                has_ai = any(c.ai_score is not None for c in candidates)
+                for cand in candidates:
+                    composite = self._compute_composite_score(
+                        cand, target_niche, has_ai,
+                    )
+                    try:
+                        self._search_repo.update_candidate_composite_score(
+                            cand.id, composite,
+                        )
+                    except Exception:
+                        pass
+
+                    # Attach for in-memory sort
+                    cand._composite = composite  # type: ignore[attr-defined]
+
+                # Quality gate: reject low composite scores
+                before_gate = len(candidates)
+                candidates = [
+                    c for c in candidates
+                    if getattr(c, '_composite', 0) >= _COMPOSITE_MIN
+                ]
+                gate_rejected = before_gate - len(candidates)
+
+                # Sort by composite score descending
+                candidates.sort(
+                    key=lambda c: getattr(c, '_composite', 0),
+                    reverse=True,
+                )
 
                 top = candidates[:_FINAL_TOP_N]
 
@@ -470,10 +829,15 @@ class SourceFinderService:
                 self._search_repo.save_results(search_id, results)
                 self._search_repo.complete_search(search_id, SEARCH_COMPLETED)
 
-                _progress(95, f"Done — {len(results)} sources found")
+                # Update source_profiles for top results
+                self._save_source_profiles(top)
+
+                _progress(95, f"Done — {len(results)} sources found "
+                              f"({gate_rejected} rejected by quality gate)")
                 logger.info(
-                    "Step 7 complete: %d results saved, search %d completed",
-                    len(results), search_id,
+                    "Step 7 complete: %d results saved (%d rejected), "
+                    "search %d completed",
+                    len(results), gate_rejected, search_id,
                 )
 
                 # Return with joined candidate data
@@ -671,3 +1035,75 @@ class SourceFinderService:
             "is_verified": cand.is_verified,
             "profile_pic_url": cand.profile_pic_url,
         }
+
+    @staticmethod
+    def _compute_composite_score(
+        cand: SourceCandidate,
+        target_niche: NicheResult,
+        has_ai_scores: bool,
+    ) -> float:
+        """Compute composite relevance score (0-100) for a candidate."""
+        score = 0.0
+
+        # Niche match (35%) — from NicheClassifier
+        niche_match = compute_niche_match(
+            target_niche,
+            cand.bio or "", "", cand.full_name or "", cand.username,
+        )
+        score += (niche_match / 100.0) * 35
+
+        # AI relevance (25%) — from Gemini, or fallback
+        if has_ai_scores and cand.ai_score is not None:
+            score += (cand.ai_score / 10.0) * 25
+        else:
+            # Fallback: use niche_match as proxy (lower weight)
+            score += (niche_match / 100.0) * 15
+
+        # Engagement rate (20%) — normalized, cap at 10%
+        if cand.avg_er is not None and cand.avg_er > 0:
+            er_norm = min(cand.avg_er, 10.0) / 10.0
+            score += er_norm * 20
+
+        # Source strategy bonus (10%)
+        strategy_bonuses = {
+            "suggested": 10.0,
+            "niche_exact": 8.0,
+            "niche_broad": 6.0,
+            "related_niche": 5.0,
+            "keyword": 4.0,
+        }
+        strategy = cand.source_type if cand.source_type == "suggested" else "keyword"
+        score += strategy_bonuses.get(strategy, 3.0)
+
+        # Language match bonus (10%)
+        cand_lang = detect_language(cand.bio)
+        if cand_lang == target_niche.language:
+            score += 10.0
+        elif cand_lang == "unknown" or target_niche.language == "unknown":
+            score += 5.0
+
+        return round(min(score, 100.0), 2)
+
+    def _save_source_profiles(self, candidates: List[SourceCandidate]) -> None:
+        """Save/update source_profiles for discovered candidates."""
+        if self._profile_repo is None:
+            return
+        for cand in candidates:
+            try:
+                cand_niche = classify_profile(
+                    cand.bio or "", "", cand.full_name or "", cand.username,
+                )
+                self._profile_repo.upsert_profile(
+                    source_name=cand.username,
+                    niche_category=cand_niche.primary_niche,
+                    niche_confidence=cand_niche.confidence,
+                    language=cand_niche.language,
+                    follower_count=cand.follower_count,
+                    bio=cand.bio,
+                    avg_er=cand.avg_er,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "Failed to save source profile for @%s: %s",
+                    cand.username, exc,
+                )

@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
+from oh.ui.style import sc
+
 from oh.models.source import (
     SourceInspectionResult, SourceRecord,
     STATUS_ACTIVE_WITH_ACTIVITY,
@@ -215,7 +217,7 @@ class SourceDialog(QDialog):
             f"Historical: <b>{r.historical_count}</b>"
             f"    |    sources.txt {txt_mark}  ·  data.db {db_mark}"
         )
-        stats.setStyleSheet("color: #aaa; font-size: 11px;")
+        stats.setStyleSheet("color: %s; font-size: 11px;" % sc("text_secondary").name())
         stats.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
@@ -233,7 +235,7 @@ class SourceDialog(QDialog):
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
         frame.setStyleSheet(
-            "QFrame { background: #1e2a1e; border-radius: 4px; }"
+            "QFrame { background: %s; border-radius: 4px; }" % sc("bg_note").name()
         )
         lo = QVBoxLayout(frame)
         lo.setContentsMargins(10, 8, 10, 8)
@@ -241,7 +243,7 @@ class SourceDialog(QDialog):
 
         if not self._fbr.schema_valid:
             lbl = QLabel(f"FBR analytics unavailable: {self._fbr.schema_error}")
-            lbl.setStyleSheet("color: #888; font-style: italic; font-size: 11px;")
+            lbl.setStyleSheet("color: %s; font-style: italic; font-size: 11px;" % sc("text_secondary").name())
             lo.addWidget(lbl)
             return frame
 
@@ -250,7 +252,7 @@ class SourceDialog(QDialog):
                 "FBR: no data in data.db yet — "
                 "this account has not been followed/unfollowed by the bot."
             )
-            lbl.setStyleSheet("color: #888; font-style: italic; font-size: 11px;")
+            lbl.setStyleSheet("color: %s; font-style: italic; font-size: 11px;" % sc("text_secondary").name())
             lo.addWidget(lbl)
             return frame
 
@@ -276,7 +278,8 @@ class SourceDialog(QDialog):
             f"&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;"
             f"Highest volume: {vol_str}"
         )
-        row1.setStyleSheet("font-size: 11px; color: #ccc;")
+        row1.setStyleSheet("font-size: 11px; color: %s;" % sc("text").name())
+        row1.setWordWrap(True)
         lo.addWidget(row1)
 
         # Row 2: thresholds + secondary stats
@@ -290,7 +293,8 @@ class SourceDialog(QDialog):
             f"Below volume floor: {fbr.below_volume_count}"
             f"{anomaly_note}"
         )
-        row2.setStyleSheet("font-size: 10px; color: #777;")
+        row2.setStyleSheet("font-size: 10px; color: %s;" % sc("text_secondary").name())
+        row2.setWordWrap(True)
         lo.addWidget(row2)
 
         return frame
@@ -338,7 +342,7 @@ class SourceDialog(QDialog):
 
         lbl = QLabel(msg)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet("color: #777; font-style: italic; padding: 40px;")
+        lbl.setStyleSheet("color: %s; font-style: italic; padding: 40px;" % sc("text_secondary").name())
         lbl.setWordWrap(True)
         return lbl
 
@@ -558,7 +562,7 @@ class SourceDialog(QDialog):
             "<span style='color:#888'>■</span> Historical only"
             f"{fbr_note}"
         )
-        lbl.setStyleSheet("font-size: 10px; color: #777; padding-top: 2px;")
+        lbl.setStyleSheet("font-size: 10px; color: %s; padding-top: 2px;" % sc("text_secondary").name())
         return lbl
 
     # ------------------------------------------------------------------
