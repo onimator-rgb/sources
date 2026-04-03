@@ -31,6 +31,7 @@ from oh.repositories.sync_repo import SyncRepository
 from oh.repositories.operator_action_repo import OperatorActionRepository
 from oh.repositories.session_repo import SessionRepository
 from oh.repositories.tag_repo import TagRepository
+from oh.repositories.error_report_repo import ErrorReportRepository
 from oh.services.fbr_service import FBRService
 from oh.services.operator_action_service import OperatorActionService
 from oh.services.recommendation_service import RecommendationService
@@ -40,6 +41,12 @@ from oh.services.session_service import SessionService
 from oh.services.source_delete_service import SourceDeleteService
 from oh.services.bulk_discovery_service import BulkDiscoveryService
 from oh.services.source_finder_service import SourceFinderService
+from oh.services.error_report_service import ErrorReportService
+from oh.services.block_detection_service import BlockDetectionService
+from oh.services.account_group_service import AccountGroupService
+from oh.services.trend_service import TrendService
+from oh.repositories.block_event_repo import BlockEventRepository
+from oh.repositories.account_group_repo import AccountGroupRepository
 try:
     from oh.services.account_detail_service import AccountDetailService
 except ImportError:
@@ -98,10 +105,13 @@ def _setup_logging() -> Path:
     return log_dir
 
 
-def _install_exception_hook() -> None:
+def _install_exception_hook(error_report_service=None) -> None:
     """
     Route unhandled exceptions through the logger so they appear in oh.log
     even when no console is attached (e.g. running via pythonw or a shortcut).
+
+    If error_report_service is provided, also captures a crash report and
+    optionally sends it to the configured endpoint.
     """
     _logger = logging.getLogger("oh.uncaught")
 
@@ -113,6 +123,15 @@ def _install_exception_hook() -> None:
             "Unhandled exception — OH will attempt to continue",
             exc_info=(exc_type, exc_value, exc_tb),
         )
+        if error_report_service is not None:
+            try:
+                report = error_report_service.capture_crash(
+                    exc_type, exc_value, exc_tb
+                )
+                if error_report_service.auto_send_enabled():
+                    error_report_service.send_report(report)
+            except Exception:
+                _logger.debug("Failed to capture/send crash report", exc_info=True)
 
     sys.excepthook = _hook
 
@@ -145,7 +164,7 @@ def bootstrap(conn) -> None:
 
 def main() -> None:
     log_dir = _setup_logging()
-    _install_exception_hook()
+    _install_exception_hook()  # basic hook first, upgraded with reporting below
 
     # Log whether we are running as a frozen .exe or from source
     import sys as _sys
@@ -177,6 +196,16 @@ def main() -> None:
             f"Check the log file for details:\n{log_dir / 'oh.log'}",
         )
         sys.exit(1)
+
+    # Error reporting — upgrade exception hook with crash capture
+    error_report_repo = ErrorReportRepository(conn)
+    error_report_service = ErrorReportService(
+        report_repo=error_report_repo,
+        settings_repo=SettingsRepository(conn),
+        conn=conn,
+    )
+    _install_exception_hook(error_report_service)
+    error_report_service.retry_unsent()
 
     settings_repo   = SettingsRepository(conn)
     theme = settings_repo.get("theme") or "dark"
@@ -278,6 +307,26 @@ def main() -> None:
 
     blacklist_repo = BlacklistRepository(conn)
 
+    # Block detection
+    block_event_repo = BlockEventRepository(conn)
+    session_repo = SessionRepository(conn)
+    block_detection_service = BlockDetectionService(
+        block_repo=block_event_repo,
+        session_repo=session_repo,
+    )
+
+    # Account groups
+    account_group_repo = AccountGroupRepository(conn)
+    account_group_service = AccountGroupService(
+        group_repo=account_group_repo,
+    )
+
+    # Trend service
+    trend_service = TrendService(
+        session_repo=session_repo,
+        fbr_snapshot_repo=fbr_snapshot_repo,
+    )
+
     window = MainWindow(
         conn,
         scan_service,
@@ -293,6 +342,11 @@ def main() -> None:
         bulk_discovery_service=bulk_discovery_service,
         account_detail_service=account_detail_service,
         blacklist_repo=blacklist_repo,
+        error_report_service=error_report_service,
+        block_detection_service=block_detection_service,
+        account_group_service=account_group_service,
+        account_group_repo=account_group_repo,
+        trend_service=trend_service,
     )
     window.show()
 

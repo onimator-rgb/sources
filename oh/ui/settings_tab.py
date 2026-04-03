@@ -305,6 +305,24 @@ class SettingsTab(QWidget):
 
         outer.addWidget(tpl_group)
 
+        # -- Error Reporting group --
+        err_group = QGroupBox("Error Reporting")
+        err_form = QFormLayout(err_group)
+        err_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._report_endpoint_edit = QLineEdit()
+        self._report_endpoint_edit.setPlaceholderText("Discord webhook URL or custom endpoint...")
+        err_form.addRow("Report endpoint:", self._report_endpoint_edit)
+
+        self._auto_crash_check = QCheckBox("Automatically send crash reports")
+        self._auto_crash_check.setToolTip(
+            "When enabled, unhandled crashes are automatically reported "
+            "(only technical data — no account/client info)."
+        )
+        err_form.addRow("", self._auto_crash_check)
+
+        outer.addWidget(err_group)
+
         # -- Save button --
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -344,6 +362,8 @@ class SettingsTab(QWidget):
         self._gemini_key_edit.setText(self._settings.get("gemini_api_key") or "")
         self._update_check.setChecked(self._settings.get("update_check_enabled") == "1")
         self._update_url_edit.setText(self._settings.get("update_check_url") or "")
+        self._report_endpoint_edit.setText(self._settings.get("report_endpoint") or "")
+        self._auto_crash_check.setChecked(self._settings.get("auto_send_crashes") != "0")
         self._load_blacklist()
 
     def _save(self) -> None:
@@ -363,6 +383,9 @@ class SettingsTab(QWidget):
 
         self._settings.set("update_check_enabled", "1" if self._update_check.isChecked() else "0")
         self._settings.set("update_check_url", self._update_url_edit.text().strip())
+
+        self._settings.set("report_endpoint", self._report_endpoint_edit.text().strip())
+        self._settings.set("auto_send_crashes", "1" if self._auto_crash_check.isChecked() else "0")
 
         new_theme = self._theme_combo.currentText()
         old_theme = self._settings.get("theme") or "dark"

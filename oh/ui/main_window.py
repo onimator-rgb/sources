@@ -92,7 +92,10 @@ COL_FBR_QUALITY = 18   # "3/12" quality/total — from latest snapshot
 COL_FBR_BEST    = 19   # best FBR % — from latest snapshot
 COL_FBR_DATE    = 20   # date of last FBR analysis
 COL_HEALTH      = 21   # composite health score (0-100)
-COL_ACTIONS     = 22
+COL_TREND       = 22   # sparkline trend
+COL_BLOCK       = 23   # block/ban indicator
+COL_GROUP       = 24   # account group name(s)
+COL_ACTIONS     = 25
 
 COLUMN_HEADERS = [
     "Username", "Device", "Hours", "Status", "Tags",
@@ -102,7 +105,7 @@ COLUMN_HEADERS = [
     "Discovered", "Last Seen",
     "Active Sources",
     "Quality/Total", "Best FBR %", "Last FBR",
-    "Health",
+    "Health", "Trend", "Block", "Group",
     "Actions",
 ]
 
@@ -170,6 +173,7 @@ _TAGS_FILTER_CUSTOM  = "Custom"
 _ACTIVITY_FILTER_ALL      = "All activity"
 _ACTIVITY_FILTER_ZERO     = "0 actions today"
 _ACTIVITY_FILTER_HAS      = "Has actions"
+_ACTIVITY_FILTER_BLOCKED  = "Blocked"
 
 
 class MainWindow(QMainWindow):
@@ -189,8 +193,18 @@ class MainWindow(QMainWindow):
         bulk_discovery_service=None,
         account_detail_service=None,
         blacklist_repo=None,
+        error_report_service=None,
+        block_detection_service=None,
+        account_group_service=None,
+        account_group_repo=None,
+        trend_service=None,
     ) -> None:
         super().__init__()
+        self._error_report_service    = error_report_service
+        self._block_detection_service = block_detection_service
+        self._account_group_service   = account_group_service
+        self._account_group_repo      = account_group_repo
+        self._trend_service           = trend_service
         self._blacklist_repo          = blacklist_repo
         self._account_detail_service  = account_detail_service
         self._scan_service            = scan_service
@@ -217,6 +231,9 @@ class MainWindow(QMainWindow):
         self._session_map: dict[int, AccountSessionRecord] = {}
         self._device_status_map: dict[str, str] = {}  # device_id → last_known_status
         self._op_tags_map: dict[int, str] = {}  # account_id → "TB3 | limits 2"
+        self._block_map: dict = {}  # account_id → [BlockEvent]
+        self._group_map: dict = {}  # account_id → [AccountGroup]
+        self._trend_map: dict = {}  # account_id → AccountTrends
 
         # Debounce timer for arrow-key navigation in the detail drawer
         self._detail_debounce_timer: Optional[QTimer] = None
@@ -293,6 +310,7 @@ class MainWindow(QMainWindow):
         page_lo.setSpacing(6)
         page_lo.addWidget(self._make_toolbar())
         page_lo.addWidget(self._make_filter_bar())
+        page_lo.addWidget(self._make_bulk_bar())
 
         # Build splitter: left = table, right = detail panel (hidden initially)
         self._accounts_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -316,6 +334,9 @@ class MainWindow(QMainWindow):
         # Connect selection model for debounced drawer updates on arrow keys
         self._table.selectionModel().currentRowChanged.connect(
             self._on_table_row_changed
+        )
+        self._table.selectionModel().selectionChanged.connect(
+            lambda: self._update_bulk_bar()
         )
 
         page_lo.addWidget(self._accounts_splitter, stretch=1)
@@ -476,6 +497,18 @@ class MainWindow(QMainWindow):
         self._export_btn.setToolTip("Export visible accounts to CSV file")
         self._export_btn.clicked.connect(self._on_export_csv)
 
+        self._groups_btn = QPushButton("Groups")
+        self._groups_btn.setFixedHeight(34)
+        self._groups_btn.setSizePolicy(_btn_policy)
+        self._groups_btn.setToolTip("Manage account groups (clients, campaigns)")
+        self._groups_btn.clicked.connect(self._on_manage_groups)
+
+        self._report_problem_btn = QPushButton("Report Problem")
+        self._report_problem_btn.setFixedHeight(34)
+        self._report_problem_btn.setSizePolicy(_btn_policy)
+        self._report_problem_btn.setToolTip("Send an anonymous problem report to the developer")
+        self._report_problem_btn.clicked.connect(self._on_report_problem)
+
         lo.addWidget(self._cockpit_btn)
         lo.addWidget(self._scan_btn)
         lo.addWidget(self._fbr_btn)
@@ -484,8 +517,10 @@ class MainWindow(QMainWindow):
         lo.addWidget(self._recs_btn)
         lo.addWidget(self._history_btn)
         lo.addWidget(self._export_btn)
+        lo.addWidget(self._groups_btn)
         lo.addSpacing(12)
         lo.addWidget(self._busy_label, stretch=1)
+        lo.addWidget(self._report_problem_btn)
         lo.addWidget(self._last_sync_label)
         return w
 
@@ -562,11 +597,21 @@ class MainWindow(QMainWindow):
         self._activity_filter = QComboBox()
         self._activity_filter.addItems([
             _ACTIVITY_FILTER_ALL, _ACTIVITY_FILTER_ZERO, _ACTIVITY_FILTER_HAS,
+            _ACTIVITY_FILTER_BLOCKED,
         ])
         self._activity_filter.setMinimumWidth(80)
         self._activity_filter.setMaximumWidth(140)
         self._activity_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._activity_filter)
+
+        # Group filter
+        lo.addWidget(QLabel("Group:"))
+        self._group_filter = QComboBox()
+        self._group_filter.addItem("All groups")
+        self._group_filter.setMinimumWidth(80)
+        self._group_filter.setMaximumWidth(140)
+        self._group_filter.currentIndexChanged.connect(self._apply_filter)
+        lo.addWidget(self._group_filter)
 
         # Review only checkbox
         self._review_cb = QCheckBox("Review only")
@@ -596,11 +641,142 @@ class MainWindow(QMainWindow):
         lo.addWidget(self._count_label)
         return w
 
+    def _make_bulk_bar(self) -> QWidget:
+        """Bulk action toolbar — visible when multiple rows are selected."""
+        w = QWidget()
+        lo = QHBoxLayout(w)
+        lo.setContentsMargins(0, 2, 0, 2)
+        lo.setSpacing(6)
+
+        self._bulk_label = QLabel("")
+        self._bulk_label.setStyleSheet(f"font-weight: bold; color: {sc('link').name()};")
+        lo.addWidget(self._bulk_label)
+
+        _bp = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+        self._bulk_review_btn = QPushButton("Set Review")
+        self._bulk_review_btn.setFixedHeight(28)
+        self._bulk_review_btn.setSizePolicy(_bp)
+        self._bulk_review_btn.clicked.connect(lambda: self._bulk_action("set_review"))
+        lo.addWidget(self._bulk_review_btn)
+
+        self._bulk_clear_btn = QPushButton("Clear Review")
+        self._bulk_clear_btn.setFixedHeight(28)
+        self._bulk_clear_btn.setSizePolicy(_bp)
+        self._bulk_clear_btn.clicked.connect(lambda: self._bulk_action("clear_review"))
+        lo.addWidget(self._bulk_clear_btn)
+
+        self._bulk_tb_btn = QPushButton("TB +1")
+        self._bulk_tb_btn.setFixedHeight(28)
+        self._bulk_tb_btn.setSizePolicy(_bp)
+        self._bulk_tb_btn.clicked.connect(lambda: self._bulk_action("tb"))
+        lo.addWidget(self._bulk_tb_btn)
+
+        self._bulk_limits_btn = QPushButton("Limits +1")
+        self._bulk_limits_btn.setFixedHeight(28)
+        self._bulk_limits_btn.setSizePolicy(_bp)
+        self._bulk_limits_btn.clicked.connect(lambda: self._bulk_action("limits"))
+        lo.addWidget(self._bulk_limits_btn)
+
+        self._bulk_group_btn = QPushButton("Assign Group")
+        self._bulk_group_btn.setFixedHeight(28)
+        self._bulk_group_btn.setSizePolicy(_bp)
+        self._bulk_group_btn.clicked.connect(lambda: self._bulk_action("assign_group"))
+        lo.addWidget(self._bulk_group_btn)
+
+        lo.addStretch()
+
+        self._bulk_bar = w
+        w.setVisible(False)
+        return w
+
+    def _get_selected_account_ids_multi(self) -> list:
+        """Return account IDs for all selected rows."""
+        ids = []
+        for idx in self._table.selectionModel().selectedRows():
+            item = self._table.item(idx.row(), COL_USERNAME)
+            if item:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if data and data[0] == "account" and data[1] is not None:
+                    ids.append(data[1])
+        return ids
+
+    def _update_bulk_bar(self) -> None:
+        """Show/hide bulk bar based on selection count."""
+        ids = self._get_selected_account_ids_multi()
+        if len(ids) > 1:
+            self._bulk_label.setText(f"{len(ids)} selected")
+            self._bulk_bar.setVisible(True)
+        else:
+            self._bulk_bar.setVisible(False)
+
+    def _bulk_action(self, action: str) -> None:
+        """Execute a bulk action on all selected accounts."""
+        ids = self._get_selected_account_ids_multi()
+        if len(ids) < 2:
+            return
+
+        if not self._operator_action_service:
+            return
+
+        from oh.ui.bulk_action_dialog import BulkActionDialog
+
+        if action == "set_review":
+            dlg = BulkActionDialog(
+                "Set Review", ids,
+                lambda aid, note=None: self._operator_action_service.set_review(aid, note),
+                show_note=True, parent=self,
+            )
+        elif action == "clear_review":
+            dlg = BulkActionDialog(
+                "Clear Review", ids,
+                lambda aid: self._operator_action_service.clear_review(aid),
+                parent=self,
+            )
+        elif action == "tb":
+            dlg = BulkActionDialog(
+                "TB +1", ids,
+                lambda aid: self._operator_action_service.increment_tb(aid),
+                parent=self,
+            )
+        elif action == "limits":
+            dlg = BulkActionDialog(
+                "Limits +1", ids,
+                lambda aid: self._operator_action_service.increment_limits(aid),
+                parent=self,
+            )
+        elif action == "assign_group":
+            if not self._account_group_service or not self._account_group_repo:
+                return
+            groups = self._account_group_repo.get_all_groups()
+            if not groups:
+                QMessageBox.information(self, "No Groups", "Create a group first via Groups button.")
+                return
+            group_names = [g.name for g in groups]
+            from PySide6.QtWidgets import QInputDialog
+            name, ok = QInputDialog.getItem(
+                self, "Assign Group", "Select group:", group_names, 0, False
+            )
+            if not ok:
+                return
+            group = next((g for g in groups if g.name == name), None)
+            if group:
+                added = self._account_group_service.assign_accounts(group.id, ids)
+                self._set_status(f"Added {added} accounts to group '{name}'")
+                self._refresh_table()
+            return
+        else:
+            return
+
+        dlg.exec()
+        self._refresh_table()
+
     def _make_table(self) -> QTableWidget:
         t = QTableWidget(0, len(COLUMN_HEADERS))
         t.setHorizontalHeaderLabels(COLUMN_HEADERS)
         t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        t.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         t.setAlternatingRowColors(True)
         t.verticalHeader().setVisible(False)
         t.setShowGrid(True)
@@ -615,7 +791,7 @@ class MainWindow(QMainWindow):
                     COL_REVIEW,
                     COL_DATA_DB, COL_SOURCES_TXT, COL_SRC_COUNT,
                     COL_FBR_QUALITY, COL_FBR_BEST, COL_FBR_DATE,
-                    COL_HOURS, COL_HEALTH, COL_ACTIONS):
+                    COL_HOURS, COL_HEALTH, COL_TREND, COL_BLOCK, COL_GROUP, COL_ACTIONS):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
 
         t.setColumnWidth(COL_USERNAME,     170)
@@ -640,6 +816,9 @@ class MainWindow(QMainWindow):
         t.setColumnWidth(COL_FBR_DATE,      72)
         t.setColumnWidth(COL_HOURS,         76)
         t.setColumnWidth(COL_HEALTH,        52)
+        t.setColumnWidth(COL_TREND,         90)
+        t.setColumnWidth(COL_BLOCK,         48)
+        t.setColumnWidth(COL_GROUP,         90)
         t.setColumnWidth(COL_ACTIONS,       80)
 
         t.doubleClicked.connect(self._on_row_double_clicked)
@@ -675,6 +854,27 @@ class MainWindow(QMainWindow):
             self._device_status_map = {r[0]: r[1] for r in rows}
         except Exception:
             self._device_status_map = {}
+        # Load block map
+        if self._block_detection_service:
+            try:
+                self._block_map = self._block_detection_service.get_active_blocks()
+            except Exception:
+                self._block_map = {}
+        # Load group membership map
+        if self._account_group_repo:
+            try:
+                self._group_map = self._account_group_repo.get_membership_map()
+            except Exception:
+                self._group_map = {}
+        # Load trend data
+        if self._trend_service:
+            try:
+                active_ids = [a.id for a in self._all_accounts if a.is_active and a.id]
+                self._trend_map = self._trend_service.get_trends_map(active_ids, days=14)
+            except Exception:
+                self._trend_map = {}
+        else:
+            self._trend_map = {}
         self._update_device_filter()
         self._apply_filter()
         self._update_last_sync_label()
@@ -1117,11 +1317,32 @@ class MainWindow(QMainWindow):
         self._device_filter.setCurrentIndex(max(idx, 0))
         self._device_filter.blockSignals(False)
 
+        # Also rebuild group filter
+        self._update_group_filter()
+
+    def _update_group_filter(self) -> None:
+        """Rebuild the group dropdown from current groups."""
+        current = self._group_filter.currentText()
+        self._group_filter.blockSignals(True)
+        self._group_filter.clear()
+        self._group_filter.addItem("All groups")
+        if self._account_group_repo:
+            try:
+                groups = self._account_group_repo.get_all_groups()
+                for g in groups:
+                    self._group_filter.addItem(g.name)
+            except Exception:
+                pass
+        idx = self._group_filter.findText(current)
+        self._group_filter.setCurrentIndex(max(idx, 0))
+        self._group_filter.blockSignals(False)
+
     def _clear_filters(self) -> None:
         """Reset all filters to their defaults without triggering multiple repaints."""
         for w in (self._status_filter, self._fbr_filter, self._device_filter,
                   self._search_box, self._show_orphans_cb,
-                  self._tags_filter, self._activity_filter, self._review_cb):
+                  self._tags_filter, self._activity_filter, self._group_filter,
+                  self._review_cb):
             w.blockSignals(True)
 
         self._status_filter.setCurrentIndex(0)
@@ -1129,13 +1350,15 @@ class MainWindow(QMainWindow):
         self._device_filter.setCurrentIndex(0)
         self._tags_filter.setCurrentIndex(0)
         self._activity_filter.setCurrentIndex(0)
+        self._group_filter.setCurrentIndex(0)
         self._search_box.clear()
         self._show_orphans_cb.setChecked(False)
         self._review_cb.setChecked(False)
 
         for w in (self._status_filter, self._fbr_filter, self._device_filter,
                   self._search_box, self._show_orphans_cb,
-                  self._tags_filter, self._activity_filter, self._review_cb):
+                  self._tags_filter, self._activity_filter, self._group_filter,
+                  self._review_cb):
             w.blockSignals(False)
 
         self._apply_filter()
@@ -1164,6 +1387,7 @@ class MainWindow(QMainWindow):
         device_filt   = self._device_filter.currentText()
         tags_filt     = self._tags_filter.currentText()
         activity_filt = self._activity_filter.currentText()
+        group_filt    = self._group_filter.currentText()
         review_only   = self._review_cb.isChecked()
         query         = self._search_box.text().strip().lower()
         show_orphans  = self._show_orphans_cb.isChecked()
@@ -1217,11 +1441,21 @@ class MainWindow(QMainWindow):
 
             # --- activity dimension ---
             if activity_filt != _ACTIVITY_FILTER_ALL and acc.id is not None:
-                sess = self._session_map.get(acc.id)
-                has_act = sess.has_activity if sess else False
-                if activity_filt == _ACTIVITY_FILTER_ZERO and has_act:
-                    continue
-                if activity_filt == _ACTIVITY_FILTER_HAS and not has_act:
+                if activity_filt == _ACTIVITY_FILTER_BLOCKED:
+                    if acc.id not in self._block_map:
+                        continue
+                else:
+                    sess = self._session_map.get(acc.id)
+                    has_act = sess.has_activity if sess else False
+                    if activity_filt == _ACTIVITY_FILTER_ZERO and has_act:
+                        continue
+                    if activity_filt == _ACTIVITY_FILTER_HAS and not has_act:
+                        continue
+
+            # --- group dimension ---
+            if group_filt != "All groups" and acc.id is not None:
+                acc_groups = self._group_map.get(acc.id, [])
+                if not any(g.name == group_filt for g in acc_groups):
                     continue
 
             # --- text search ---
@@ -1422,6 +1656,40 @@ class MainWindow(QMainWindow):
             health_item.setForeground(sc(AccountHealthService.score_color_key(health)))
         self._table.setItem(row, COL_HEALTH, health_item)
 
+        # Trend column — placeholder text, sparklines loaded lazily
+        trend_text = ""
+        if acc.id is not None and acc.id in self._trend_map:
+            trend_data = self._trend_map[acc.id]
+            arrow = {
+                "up": "\u25b2", "down": "\u25bc", "stable": "\u25ac"
+            }.get(trend_data.trend_direction, "")
+            trend_text = arrow
+        trend_item = self._make_item(trend_text, center, dimmed=removed)
+        if trend_text == "\u25b2":
+            trend_item.setForeground(QColor("#4CAF50"))
+        elif trend_text == "\u25bc":
+            trend_item.setForeground(QColor("#F44336"))
+        self._table.setItem(row, COL_TREND, trend_item)
+
+        # Block indicator
+        blocks = self._block_map.get(acc.id, []) if acc.id else []
+        if blocks and not removed:
+            block_types = ", ".join(b.label for b in blocks)
+            block_item = self._make_item("\u26a0", center, C_NO())
+            block_item.setToolTip(f"Active: {block_types}")
+        else:
+            block_item = self._make_item("", center, dimmed=removed)
+        self._table.setItem(row, COL_BLOCK, block_item)
+
+        # Group column
+        groups = self._group_map.get(acc.id, []) if acc.id else []
+        if groups:
+            group_names = ", ".join(g.name for g in groups)
+            group_item = self._make_item(group_names, dimmed=removed)
+        else:
+            group_item = self._make_item("\u2014", center, dimmed=removed)
+        self._table.setItem(row, COL_GROUP, group_item)
+
         self._table.item(row, COL_USERNAME).setData(
             Qt.ItemDataRole.UserRole, ("account", acc.id)
         )
@@ -1463,6 +1731,11 @@ class MainWindow(QMainWindow):
 
         # Health — not available for orphans
         self._table.setItem(row, COL_HEALTH, self._make_item("—", center))
+
+        # Trend / Block / Group — not available for orphans
+        self._table.setItem(row, COL_TREND, self._make_item("", center))
+        self._table.setItem(row, COL_BLOCK, self._make_item("", center))
+        self._table.setItem(row, COL_GROUP, self._make_item("—", center))
 
         self._table.item(row, COL_USERNAME).setData(
             Qt.ItemDataRole.UserRole, ("orphan", disc)
@@ -2307,7 +2580,8 @@ class MainWindow(QMainWindow):
         self._set_status(f"Opened: {folder}")
 
     def _on_row_double_clicked(self, index) -> None:
-        row  = index.row()
+        row = index.row()
+        col = index.column()
         item = self._table.item(row, COL_USERNAME)
         if not item:
             return
@@ -2315,6 +2589,19 @@ class MainWindow(QMainWindow):
         if not data:
             return
         kind, payload = data
+
+        # Double-click on Trend column → open trend dialog
+        if col == COL_TREND and kind == "account" and self._trend_service:
+            acc = self._accounts.get_by_id(payload)
+            if acc:
+                from oh.ui.trend_dialog import TrendDialog
+                dlg = TrendDialog(
+                    self._trend_service, acc.id, acc.username,
+                    acc.device_name or acc.device_id, parent=self,
+                )
+                dlg.exec()
+            return
+
         if kind == "account":
             acc = self._accounts.get_by_id(payload)
             if acc and acc.is_active:
@@ -2389,6 +2676,67 @@ class MainWindow(QMainWindow):
             self._set_status("Exported to %s" % path)
         except Exception as exc:
             QMessageBox.critical(self, "Export Failed", "Failed to export CSV:\n\n%s" % exc)
+
+    # ------------------------------------------------------------------
+    # Groups
+    # ------------------------------------------------------------------
+
+    def _on_manage_groups(self) -> None:
+        """Open group management dialog."""
+        if self._account_group_service is None or self._account_group_repo is None:
+            QMessageBox.information(self, "Groups", "Group management is not available.")
+            return
+        from oh.ui.group_management_dialog import GroupManagementDialog
+        dlg = GroupManagementDialog(
+            self._account_group_service,
+            self._all_accounts,
+            parent=self,
+        )
+        dlg.exec()
+        self._refresh_table()
+
+    # ------------------------------------------------------------------
+    # Error reporting
+    # ------------------------------------------------------------------
+
+    def _on_report_problem(self) -> None:
+        """Open a dialog for the user to describe a problem, then send report."""
+        if self._error_report_service is None:
+            QMessageBox.information(
+                self, "Report Problem",
+                "Error reporting is not configured.",
+            )
+            return
+
+        note, ok = QInputDialog.getMultiLineText(
+            self, "Report Problem",
+            "Describe what happened (optional).\n"
+            "An anonymous report with technical logs will be sent.",
+        )
+        if not ok:
+            return
+
+        try:
+            report = self._error_report_service.capture_manual(note or "")
+            sent = self._error_report_service.send_report(report)
+            if sent:
+                self._set_status("Problem report sent successfully.")
+                QMessageBox.information(
+                    self, "Report Sent",
+                    f"Report {report.report_id[:8]} sent. Thank you!",
+                )
+            else:
+                self._set_status("Report saved locally (no endpoint configured or send failed).")
+                QMessageBox.warning(
+                    self, "Report Queued",
+                    "Report saved locally. It will be sent when the endpoint is configured.",
+                )
+        except Exception as exc:
+            logger.warning(f"Failed to create problem report: {exc}", exc_info=True)
+            QMessageBox.critical(
+                self, "Report Failed",
+                f"Could not create report:\n\n{exc}",
+            )
 
     def _set_status(self, message: str) -> None:
         self._statusbar.showMessage(message)

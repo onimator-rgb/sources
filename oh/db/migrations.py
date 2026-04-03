@@ -528,6 +528,64 @@ CREATE INDEX IF NOT EXISTS idx_templates_niche
 """
 
 # ---------------------------------------------------------------------------
+# Migration 013 — error reporting, block detection, account groups
+# ---------------------------------------------------------------------------
+
+_MIGRATION_013_SQL = """
+CREATE TABLE IF NOT EXISTS error_reports (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id       TEXT    NOT NULL UNIQUE,
+    error_type      TEXT    NOT NULL,
+    error_message   TEXT,
+    traceback       TEXT,
+    oh_version      TEXT,
+    os_version      TEXT,
+    python_version  TEXT,
+    db_stats        TEXT,
+    log_tail        TEXT,
+    user_note       TEXT,
+    sent_at         TEXT,
+    created_at      TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS block_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id      INTEGER NOT NULL REFERENCES oh_accounts(id),
+    event_type      TEXT    NOT NULL,
+    detected_at     TEXT    NOT NULL,
+    evidence        TEXT,
+    resolved_at     TEXT,
+    auto_detected   INTEGER DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_block_events_account
+    ON block_events(account_id, detected_at DESC);
+
+CREATE TABLE IF NOT EXISTS account_groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    color       TEXT    DEFAULT '#5B8DEF',
+    description TEXT,
+    created_at  TEXT    NOT NULL,
+    updated_at  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS account_group_members (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id    INTEGER NOT NULL REFERENCES account_groups(id) ON DELETE CASCADE,
+    account_id  INTEGER NOT NULL REFERENCES oh_accounts(id),
+    added_at    TEXT    NOT NULL,
+    UNIQUE(group_id, account_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_members_group
+    ON account_group_members(group_id);
+
+CREATE INDEX IF NOT EXISTS idx_group_members_account
+    ON account_group_members(account_id)
+"""
+
+# ---------------------------------------------------------------------------
 # Registry — append new entries here, never modify existing ones
 # ---------------------------------------------------------------------------
 
@@ -544,6 +602,7 @@ _MIGRATIONS: List[Tuple[int, str, str]] = [
     (10, "smart_source_discovery", _MIGRATION_010_SQL),
     (11, "blacklist_and_notes", _MIGRATION_011_SQL),
     (12, "campaign_templates",  _MIGRATION_012_SQL),
+    (13, "error_reports_blocks_groups", _MIGRATION_013_SQL),
 ]
 
 
