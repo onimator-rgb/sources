@@ -52,6 +52,11 @@ a = Analysis(
         # Source Finder dependencies
         "requests",
         "google.generativeai",
+        # License system
+        "cryptography",
+        "cryptography.hazmat.primitives.asymmetric.ed25519",
+        "cryptography.hazmat.primitives",
+        "cryptography.hazmat.backends",
     ],
     hookspath=[],
     hooksconfig={},
@@ -87,7 +92,7 @@ exe = EXE(
     name="OH",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
+    strip=True,
     upx=False,          # UPX can cause false-positive AV detections — keep off
     upx_exclude=[],
     runtime_tmpdir=None,

@@ -16,6 +16,9 @@ ACTION_ADD_TAG          = "add_tag"
 ACTION_REMOVE_TAG       = "remove_tag"
 ACTION_INCREMENT_TB     = "increment_tb"
 ACTION_INCREMENT_LIMITS = "increment_limits"
+ACTION_COPY_SETTINGS    = "copy_settings"
+ACTION_DISTRIBUTE_SOURCES = "distribute_sources"
+ACTION_APPLY_WARMUP       = "apply_warmup"
 
 
 @dataclass

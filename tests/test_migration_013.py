@@ -160,7 +160,7 @@ class TestMigration013(unittest.TestCase):
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
         versions = [r["version"] for r in rows]
-        self.assertEqual(versions, list(range(1, 14)))
+        self.assertEqual(versions, list(range(1, 17)))
 
 
 if __name__ == "__main__":

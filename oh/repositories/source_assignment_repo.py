@@ -68,14 +68,14 @@ class SourceAssignmentRepository:
         self._conn.executemany(
             """
             INSERT INTO source_assignments
-                (account_id, source_name, is_active, snapshot_id, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+                (account_id, source_name, is_active, snapshot_id, updated_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_id, source_name) DO UPDATE SET
                 is_active   = excluded.is_active,
                 snapshot_id = COALESCE(excluded.snapshot_id, snapshot_id),
                 updated_at  = excluded.updated_at
             """,
-            rows,
+            [(a, n, ia, sid, ts, ts) for a, n, ia, sid, ts in rows],
         )
         self._conn.commit()
 
@@ -303,15 +303,48 @@ class SourceAssignmentRepository:
         now = _utcnow()
         self._conn.execute(
             """
-            INSERT INTO source_assignments (account_id, source_name, is_active, updated_at)
-            VALUES (?, ?, 1, ?)
+            INSERT INTO source_assignments (account_id, source_name, is_active, updated_at, created_at)
+            VALUES (?, ?, 1, ?, ?)
             ON CONFLICT(account_id, source_name) DO UPDATE SET
                 is_active  = 1,
                 updated_at = excluded.updated_at
             """,
-            (account_id, source_name.strip(), now),
+            (account_id, source_name.strip(), now, now),
         )
         self._conn.commit()
+
+    def get_source_dates_for_account(self, account_id: int) -> dict:
+        """Return {lowercase_source_name: created_at_date_str} for the account."""
+        rows = self._conn.execute(
+            """
+            SELECT LOWER(TRIM(source_name)) AS sn, created_at
+            FROM source_assignments
+            WHERE account_id = ?
+            """,
+            (account_id,),
+        ).fetchall()
+        result = {}
+        for r in rows:
+            ca = r["created_at"]
+            if ca:
+                result[r["sn"]] = ca[:10]  # just the date part
+        return result
+
+    def get_active_source_names_for_account(self, account_id: int) -> set:
+        """
+        Return a set of lowercase, trimmed source names that are currently
+        active (is_active=1) for the given account.
+        Used by TargetSplitterService for skip-checking.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT LOWER(TRIM(source_name)) AS sn
+            FROM source_assignments
+            WHERE account_id = ? AND is_active = 1
+            """,
+            (account_id,),
+        ).fetchall()
+        return {r["sn"] for r in rows}
 
     def deactivate_removed_accounts(self) -> int:
         """Mark all source assignments as inactive for removed accounts.

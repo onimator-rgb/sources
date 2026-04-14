@@ -10,6 +10,7 @@ Safety:
   - data.db is never touched
 """
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -50,8 +51,19 @@ class SourceRestorer:
         If sources.txt does not exist, it is created.
         A backup is written before any modification.
         """
+        # Validate source name — only alphanumeric, dots, underscores
+        _SOURCE_RE = re.compile(r'^[a-zA-Z0-9_.]+$')
+        stripped_name = source_name.strip()
+        if not _SOURCE_RE.match(stripped_name):
+            logger.warning(f"Invalid source name rejected: '{source_name}'")
+            return SourceRestoreFileResult(
+                username=username, device_name=device_name,
+                restored=False, already_present=False, backed_up=False,
+                error=f"Invalid source name: '{source_name}'",
+            )
+
         path = self._root / device_id / username / "sources.txt"
-        target = source_name.strip().lower()
+        target = stripped_name.lower()
 
         # Read current content (or empty if file doesn't exist)
         content = ""

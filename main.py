@@ -11,6 +11,7 @@ import sys
 import logging
 import logging.handlers
 from pathlib import Path
+from typing import Optional
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QFont, QIcon
@@ -45,6 +46,10 @@ from oh.services.error_report_service import ErrorReportService
 from oh.services.block_detection_service import BlockDetectionService
 from oh.services.account_group_service import AccountGroupService
 from oh.services.trend_service import TrendService
+from oh.services.auto_fix_service import AutoFixService
+from oh.services.settings_copier_service import SettingsCopierService
+from oh.repositories.warmup_template_repo import WarmupTemplateRepository
+from oh.services.warmup_template_service import WarmupTemplateService
 from oh.repositories.block_event_repo import BlockEventRepository
 from oh.repositories.account_group_repo import AccountGroupRepository
 try:
@@ -162,7 +167,35 @@ def bootstrap(conn) -> None:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _compute_exe_sha256() -> Optional[str]:
+    """Compute SHA256 of the running .exe for integrity logging."""
+    if not getattr(sys, 'frozen', False):
+        return None
+    try:
+        import hashlib
+        h = hashlib.sha256()
+        exe_path = Path(sys.executable)
+        with open(exe_path, 'rb') as f:
+            while True:
+                chunk = f.read(1 << 20)  # 1 MB chunks
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
 def main() -> None:
+    # --- Anti-debug: silently exit if a debugger is attached (frozen only) ---
+    if getattr(sys, 'frozen', False):
+        try:
+            import ctypes
+            if ctypes.windll.kernel32.IsDebuggerPresent():
+                sys.exit(1)
+        except Exception:
+            pass
+
     log_dir = _setup_logging()
     _install_exception_hook()  # basic hook first, upgraded with reporting below
 
@@ -196,6 +229,15 @@ def main() -> None:
             f"Check the log file for details:\n{log_dir / 'oh.log'}",
         )
         sys.exit(1)
+
+    # Self-integrity check — log SHA256 of the running .exe
+    exe_hash = _compute_exe_sha256()
+    if exe_hash:
+        logger.info(f"EXE integrity SHA256: {exe_hash}")
+        try:
+            SettingsRepository(conn).set("exe_sha256", exe_hash)
+        except Exception:
+            logger.debug("Failed to store exe_sha256 in settings", exc_info=True)
 
     # Error reporting — upgrade exception hook with crash capture
     error_report_repo = ErrorReportRepository(conn)
@@ -327,6 +369,33 @@ def main() -> None:
         fbr_snapshot_repo=fbr_snapshot_repo,
     )
 
+    # Auto-fix (self-healing)
+    auto_fix_service = AutoFixService(
+        conn=conn,
+        settings_repo=settings_repo,
+        operator_action_service=operator_action_service,
+        source_delete_service=source_delete_service,
+        account_repo=account_repo,
+        tag_repo=tag_repo,
+        assignment_repo=assignment_repo,
+    )
+
+    # Warmup templates
+    warmup_template_repo = WarmupTemplateRepository(conn)
+    warmup_template_service = WarmupTemplateService(
+        warmup_repo=warmup_template_repo,
+        account_repo=account_repo,
+        action_repo=operator_action_repo,
+        settings_repo=settings_repo,
+    )
+
+    # Settings copier
+    settings_copier_service = SettingsCopierService(
+        account_repo=account_repo,
+        action_repo=operator_action_repo,
+        settings_repo=settings_repo,
+    )
+
     window = MainWindow(
         conn,
         scan_service,
@@ -347,6 +416,9 @@ def main() -> None:
         account_group_service=account_group_service,
         account_group_repo=account_group_repo,
         trend_service=trend_service,
+        auto_fix_service=auto_fix_service,
+        settings_copier_service=settings_copier_service,
+        warmup_template_service=warmup_template_service,
     )
     window.show()
 

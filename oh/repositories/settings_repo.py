@@ -6,6 +6,7 @@ import socket
 import sqlite3
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -24,9 +25,17 @@ _CONFIG_DEFAULTS = [
     ("bulk_auto_add_top_n",          "5",   "How many top results to auto-add per account in bulk discovery"),
     ("auto_scan_enabled",            "0",   "Enable automatic periodic Scan & Sync"),
     ("auto_scan_interval_hours",     "6",   "Hours between automatic scans"),
-    ("update_check_url",             "https://raw.githubusercontent.com/onimator-rgb/oh-releases/main/update.json",    "URL to check for OH updates (JSON endpoint)"),
     ("update_check_enabled",         "1",   "Enable automatic update checking on startup"),
     ("update_skipped_version",       "",    "Version that was skipped by user"),
+    ("auto_fix_source_cleanup",      "0",   "Detect dead sources (wFBR~0) after Scan"),
+    ("auto_fix_source_threshold",    "0.5", "wFBR% threshold for auto source cleanup"),
+    ("auto_fix_tb_escalation",       "0",   "Detect TB escalation candidates after Scan"),
+    ("auto_fix_dead_device_alert",   "0",   "Detect devices with 0 activity today"),
+    ("auto_fix_duplicate_cleanup",   "0",   "Detect duplicate sources in sources.txt"),
+    ("onboarding_done",              "0",   "Whether the first-run onboarding wizard has been completed"),
+    ("last_seen_version",            "",    "Last version for which What's New was shown"),
+    ("show_help_tips",               "0",   "Show contextual help buttons (?) in the UI"),
+    ("tour_completed",               "0",   "Whether the guided tour has been completed"),
 ]
 
 
@@ -76,7 +85,26 @@ class SettingsRepository:
         return self.get("bot_root_path")
 
     def set_bot_root(self, path: str) -> None:
-        self.set("bot_root_path", path)
+        """Set bot root after validating it is a safe, existing directory."""
+        resolved = Path(path).resolve()
+
+        # Must be an existing directory
+        if not resolved.is_dir():
+            raise ValueError(f"Bot root is not an existing directory: {path}")
+
+        # Must not be a system directory
+        _BLOCKED_PREFIXES = [
+            "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)",
+            "C:\\ProgramData",
+        ]
+        resolved_str = str(resolved)
+        for prefix in _BLOCKED_PREFIXES:
+            if resolved_str.lower().startswith(prefix.lower()):
+                raise ValueError(
+                    f"Bot root must not be a system directory: {resolved_str}"
+                )
+
+        self.set("bot_root_path", str(resolved))
 
     def get_fbr_thresholds(self) -> tuple:
         """Returns (min_follows: int, min_fbr: float) with fallback defaults."""

@@ -5,11 +5,11 @@ A single scrollable view with 5 sections showing the operational state
 at a glance.  Designed to be opened at the start of a shift.
 
 Sections:
-  A. Do zrobienia teraz — CRITICAL/HIGH recommendations
-  B. Konta do review — flagged accounts
-  C. Top rekomendacje — next 10 recommendations (deduplicated)
-  D. Ostatnie source actions — recent delete history
-  E. Dzisiaj wykonano — today's operator actions
+  A. Action required now — CRITICAL/HIGH recommendations
+  B. Accounts for review — flagged accounts
+  C. Top recommendations — next 10 recommendations (deduplicated)
+  D. Recent source actions — recent delete history
+  E. Completed today — today's operator actions
 """
 import logging
 from datetime import datetime
@@ -62,14 +62,14 @@ _OP_ACTION_LABELS = {
 
 # Short action commands for section A
 _SHORT_ACTIONS = {
-    REC_LOW_FBR_SOURCE:   "Usun zrodlo",
-    REC_SOURCE_EXHAUSTION: "Wymien zrodla",
-    REC_LOW_LIKE:         "Sprawdz like sources",
-    REC_LIMITS_MAX:       "Wymien zrodla",
-    REC_TB_MAX:           "Przenies konto",
-    REC_ZERO_ACTION:      "Sprawdz konto",
-    REC_SOURCE_FBR_DECLINING: "Usun slabe zrodlo",
-    REC_SOURCE_EXHAUSTED: "Wymien zrodlo",
+    REC_LOW_FBR_SOURCE:   "Delete source",
+    REC_SOURCE_EXHAUSTION: "Replace sources",
+    REC_LOW_LIKE:         "Check like sources",
+    REC_LIMITS_MAX:       "Replace sources",
+    REC_TB_MAX:           "Move account",
+    REC_ZERO_ACTION:      "Check account",
+    REC_SOURCE_FBR_DECLINING: "Delete weak source",
+    REC_SOURCE_EXHAUSTED: "Replace source",
 }
 
 
@@ -89,6 +89,7 @@ class CockpitDialog(QDialog):
         on_open_delete_history: Optional[Callable] = None,
         on_open_action_history: Optional[Callable] = None,
         on_refresh: Optional[Callable] = None,
+        auto_fix_lines: Optional[list] = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -98,6 +99,7 @@ class CockpitDialog(QDialog):
         self._deletions = recent_deletions
         self._actions = recent_actions
         self._action_svc = operator_action_service
+        self._auto_fix_lines = auto_fix_lines or []
         self._nav_account = on_navigate_account
         self._nav_source = on_navigate_source
         self._open_report = on_open_session_report
@@ -173,6 +175,28 @@ class CockpitDialog(QDialog):
                 w.deleteLater()
 
         self._update_summary()
+
+        # Auto-fix banner (if there were any auto-fix actions)
+        if self._auto_fix_lines:
+            af_frame = QFrame()
+            af_frame.setStyleSheet(
+                f"QFrame {{ background: {sc('bg_note').name()}; "
+                f"border: 1px solid {sc('status_ok').name()}; "
+                f"border-radius: 6px; padding: 8px; }}"
+            )
+            af_lo = QVBoxLayout(af_frame)
+            af_lo.setContentsMargins(10, 6, 10, 6)
+            af_title = QLabel("\u2699  Auto-Fix Results (operator-approved)")
+            af_title.setStyleSheet(
+                f"font-weight: bold; font-size: 12px; color: {sc('status_ok').name()};"
+            )
+            af_lo.addWidget(af_title)
+            for line in self._auto_fix_lines:
+                lbl = QLabel(f"\u2022  {line}")
+                lbl.setStyleSheet(f"font-size: 11px; color: {sc('text').name()};")
+                af_lo.addWidget(lbl)
+            self._content_lo.addWidget(af_frame)
+
         self._content_lo.addWidget(self._make_urgent_section())
         self._content_lo.addWidget(self._make_review_section())
         self._content_lo.addWidget(self._make_recs_section())
@@ -195,7 +219,7 @@ class CockpitDialog(QDialog):
         )
 
     # ------------------------------------------------------------------
-    # A: Do zrobienia teraz
+    # A: Action required now
     # ------------------------------------------------------------------
 
     def _make_urgent_section(self) -> QWidget:
@@ -223,7 +247,7 @@ class CockpitDialog(QDialog):
         btns.append(("Open Report", self._open_report))
 
         frame, table = self._make_section(
-            f"\u26a0  Do zrobienia teraz  ({len(self._urgent_items)} {sev_label})",
+            f"\u26a0  Action required now  ({len(self._urgent_items)} {sev_label})",
             ["Sev", "Type", "Target", "Action"],
             rows,
             self._urgent_items,
@@ -251,7 +275,7 @@ class CockpitDialog(QDialog):
         self._do_refresh()
 
     # ------------------------------------------------------------------
-    # B: Konta do review
+    # B: Accounts for review
     # ------------------------------------------------------------------
 
     def _make_review_section(self) -> QWidget:
@@ -270,12 +294,12 @@ class CockpitDialog(QDialog):
             btns.append(("Clear Review", self._review_clear))
 
         frame, table = self._make_section(
-            f"Konta do review  ({len(accts)})",
+            f"Accounts for review  ({len(accts)})",
             ["Username", "Device", "Note", "Flagged At"],
             rows,
             accts,
             buttons=btns,
-            empty_msg="Brak kont do review.",
+            empty_msg="No accounts flagged for review.",
         )
         self._review_table = table
         return frame
@@ -284,7 +308,7 @@ class CockpitDialog(QDialog):
         acc = self._get_selected_obj(self._review_table, self._review[:20])
         if acc and acc.id and self._nav_account:
             self._nav_account(acc.id)
-            self._status.setText(f"Otwarto: {acc.username}")
+            self._status.setText(f"Opened: {acc.username}")
 
     def _review_clear(self) -> None:
         acc = self._get_selected_obj(self._review_table, self._review[:20])
@@ -295,7 +319,7 @@ class CockpitDialog(QDialog):
         self._do_refresh()
 
     # ------------------------------------------------------------------
-    # C: Top rekomendacje
+    # C: Top recommendations
     # ------------------------------------------------------------------
 
     def _make_recs_section(self) -> QWidget:
@@ -322,12 +346,12 @@ class CockpitDialog(QDialog):
         ]
 
         frame, table = self._make_section(
-            f"Top rekomendacje  ({len(self._recs_items)})",
+            f"Top recommendations  ({len(self._recs_items)})",
             ["Sev", "Type", "Target", "Reason"],
             rows,
             self._recs_items,
             buttons=btns,
-            empty_msg="Brak dodatkowych rekomendacji.",
+            empty_msg="No additional recommendations.",
         )
         self._recs_table = table
         return frame
@@ -338,7 +362,7 @@ class CockpitDialog(QDialog):
             self._navigate(rec)
 
     # ------------------------------------------------------------------
-    # D: Ostatnie source actions
+    # D: Recent source actions
     # ------------------------------------------------------------------
 
     def _make_deletions_section(self) -> QWidget:
@@ -356,17 +380,17 @@ class CockpitDialog(QDialog):
             ])
 
         frame, _ = self._make_section(
-            f"Ostatnie source actions  ({len(items)})",
+            f"Recent source actions  ({len(items)})",
             ["Date", "Type", "Scope", "Sources", "Accounts", "Status"],
             rows,
             None,
             buttons=[("Open Delete History", self._open_history)],
-            empty_msg="Brak operacji na zrodlach.",
+            empty_msg="No source operations.",
         )
         return frame
 
     # ------------------------------------------------------------------
-    # E: Dzisiaj wykonano
+    # E: Completed today
     # ------------------------------------------------------------------
 
     def _make_today_section(self) -> QWidget:
@@ -384,12 +408,12 @@ class CockpitDialog(QDialog):
             ])
 
         frame, _ = self._make_section(
-            f"Dzisiaj wykonano  ({len(items)})",
+            f"Completed today  ({len(items)})",
             ["Time", "Username", "Action", "Change"],
             rows,
             None,
             buttons=[("Open Action History", self._open_actions)],
-            empty_msg="Brak akcji dzisiaj.",
+            empty_msg="No actions today.",
         )
         return frame
 
@@ -493,20 +517,20 @@ class CockpitDialog(QDialog):
         if hasattr(obj, 'target_type'):
             if obj.target_type == TARGET_ACCOUNT and obj.account_id and self._nav_account:
                 self._nav_account(obj.account_id)
-                self._status.setText(f"Otwarto: {obj.target_id}")
+                self._status.setText(f"Opened: {obj.target_id}")
             elif obj.target_type == TARGET_SOURCE and self._nav_source:
                 self._nav_source(obj.target_id)
                 self._status.setText(f"Sources: {obj.target_id}")
         elif hasattr(obj, 'review_flag') and obj.id and self._nav_account:
             self._nav_account(obj.id)
-            self._status.setText(f"Otwarto: {obj.username}")
+            self._status.setText(f"Opened: {obj.username}")
 
     def _get_selected_obj(self, table, items):
         if not table or not items:
             return None
         selected = table.selectionModel().selectedRows()
         if not selected:
-            self._status.setText("Zaznacz wiersz.")
+            self._status.setText("Select a row.")
             return None
         row = selected[0].row()
         return items[row] if row < len(items) else None

@@ -14,6 +14,7 @@ Workflow:
     5. Copy to OH_Distribution folder
     6. Done — clients see the update on next startup
 """
+import hashlib
 import json
 import os
 import re
@@ -123,9 +124,21 @@ def create_github_release(version: str, changelog: str) -> str:
     return download_url
 
 
+def compute_exe_sha256() -> str:
+    """Compute SHA256 hash of the built OH.exe."""
+    h = hashlib.sha256()
+    with open(EXE_PATH, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def update_json_on_github(version: str, download_url: str, changelog: str) -> bool:
     """Push update.json to the main branch of the releases repo."""
     print("\n4. Updating update.json on GitHub...")
+
+    exe_sha256 = compute_exe_sha256()
+    print(f"  SHA256: {exe_sha256}")
 
     update_data = {
         "version": version,
@@ -133,6 +146,7 @@ def update_json_on_github(version: str, download_url: str, changelog: str) -> bo
         "changelog": changelog,
         "release_date": date.today().isoformat(),
         "min_version": "1.0.0",
+        "sha256": exe_sha256,
     }
 
     # Clone repo to temp dir, update file, push
@@ -205,11 +219,28 @@ def update_json_on_github(version: str, download_url: str, changelog: str) -> bo
 
 
 def copy_to_distribution(version: str) -> None:
-    """Copy new .exe to OH_Distribution folder."""
+    """Copy all distribution files to OH_Distribution folder."""
     print("\n5. Updating OH_Distribution folder...")
     DIST_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Core: OH.exe
     shutil.copy2(str(EXE_PATH), str(DIST_DIR / "OH.exe"))
-    print(f"  Copied to: {DIST_DIR / 'OH.exe'}")
+    print(f"  OH.exe copied ({EXE_PATH.stat().st_size / 1024 / 1024:.1f} MB)")
+
+    # Version file for START.bat pre-launch checks
+    ver_file = DIST_DIR / ".oh_version"
+    ver_file.write_text(version + "\n", encoding="utf-8")
+    print(f"  .oh_version: {version}")
+
+    # Copy PDF guides if they exist
+    docs_dir = PROJECT_DIR / "docs"
+    for pdf_name in ("OH_User_Guide_EN.pdf", "OH_User_Guide_PL.pdf"):
+        src = docs_dir / pdf_name
+        if src.exists():
+            shutil.copy2(str(src), str(DIST_DIR / pdf_name))
+            print(f"  {pdf_name} copied")
+
+    print(f"  Distribution ready: {DIST_DIR}")
 
 
 def main():

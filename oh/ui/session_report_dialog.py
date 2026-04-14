@@ -51,11 +51,11 @@ _TB_RE = re.compile(r"TB(\d)", re.IGNORECASE)
 
 # TB warmup recommendations per level
 _TB_RECOMMENDATIONS = {
-    1: "Warmup od nowa: Follow Limit/day=10, Added Daily Limit=10, Till it Reaches=80, Like Limit/day=10",
-    2: "Warmup od nowa: Follow Limit/day=10, Added Daily Limit=10, Till it Reaches=60, Like Limit/day=10",
-    3: "Warmup od nowa: Follow Limit/day=10, Added Daily Limit=10, Till it Reaches=40, Like Limit/day=10",
-    4: "Warmup od nowa: Follow Limit/day=10, Added Daily Limit=10, Till it Reaches=30, Like Limit/day=10",
-    5: "Przenieś konto na inne urządzenie, warmup od zera",
+    1: "Restart warmup: Follow Limit/day=10, Added Daily Limit=10, Till it Reaches=80, Like Limit/day=10",
+    2: "Restart warmup: Follow Limit/day=10, Added Daily Limit=10, Till it Reaches=60, Like Limit/day=10",
+    3: "Restart warmup: Follow Limit/day=10, Added Daily Limit=10, Till it Reaches=40, Like Limit/day=10",
+    4: "Restart warmup: Follow Limit/day=10, Added Daily Limit=10, Till it Reaches=30, Like Limit/day=10",
+    5: "Move account to another device, restart warmup from zero",
 }
 
 
@@ -312,13 +312,13 @@ class SessionReportDialog(QDialog):
             acct_count = info["accounts"]
             if st == "HARDWARE":
                 sev = "CRITICAL"
-                rec = "Natychmiast odłącz, przenieś konta na nowe urządzenie."
+                rec = "Disconnect immediately, move accounts to a new device."
             elif acct_count > 0:
                 sev = "CRITICAL"
-                rec = f"Restart Onimator na urządzeniu. Sprawdź kabel/WiFi/zasilanie."
+                rec = "Restart Onimator on the device. Check cable/WiFi/power."
             else:
                 sev = "MEDIUM"
-                rec = "Brak aktywnych kont. Sprawdź czy urządzenie jest potrzebne."
+                rec = "No active accounts. Check if device is still needed."
             rows.append([sev, info["name"], st, str(acct_count), rec])
         rows.sort(key=lambda r: _SEV_RANK.get(r[0], 9))
         return rows
@@ -335,13 +335,13 @@ class SessionReportDialog(QDialog):
             note = (acc.review_note or "").lower()
             if any(kw in note for kw in ("block", "try again", "banned")):
                 sev = "HIGH"
-                rec = "Sprawdź status blocka. Jeśli minął, clear flag i restart."
+                rec = "Check block status. If expired, clear flag and restart."
             elif "pending" in note:
                 sev = "MEDIUM"
-                rec = "Operacja oczekująca. Sprawdź postęp."
+                rec = "Operation pending. Check progress."
             else:
                 sev = "LOW"
-                rec = "Przejrzyj notatkę i podejmij decyzję."
+                rec = "Review the note and make a decision."
             rows.append([
                 sev,
                 acc.username,
@@ -376,16 +376,16 @@ class SessionReportDialog(QDialog):
                 # Handled in "0 actions" tab already — skip unless follow-only zero
                 if sess and (sess.like_count > 0 or sess.dm_count > 0):
                     sev = "HIGH"
-                    rec = f"Follow=0 ale inne akcje działają. Sprawdź sources/popup.{limits_note}"
+                    rec = f"Follow=0 but other actions working. Check sources/popup.{limits_note}"
                 else:
                     continue  # fully zero → in 0 actions tab
             elif follow < 40:
                 sev = "MEDIUM"
-                rec = f"Follow<40. Możliwy throttle lub block.{limits_note}"
+                rec = f"Follow<40. Possible throttle or block.{limits_note}"
             elif limit > 0 and follow < limit * 0.5:
                 sev = "LOW"
                 pct_val = round(follow / limit * 100, 1)
-                rec = f"{pct_val}% limitu. Monitor, możliwe slow scraping.{limits_note}"
+                rec = f"{pct_val}% of limit. Monitor, possible slow scraping.{limits_note}"
             else:
                 continue
 
@@ -424,14 +424,14 @@ class SessionReportDialog(QDialog):
 
             if like == 0 and (sess.follow_count > 0 or self._is_active_slot(acc)):
                 sev = "MEDIUM"
-                rec = "Like=0 ale konto aktywne. Sprawdź like sources i ustawienia."
+                rec = "Like=0 but account active. Check like sources and settings."
             elif 0 < like < 75:
                 sev = "LOW"
-                rec = "Like<75. Sprawdź like-source-followers.txt, rozważ nowe źródła."
+                rec = "Like<75. Check like-source-followers.txt, consider new sources."
             elif limit > 0 and like < limit * 0.3:
                 sev = "LOW"
                 pct_val = round(like / limit * 100, 1)
-                rec = f"{pct_val}% limitu. Monitor."
+                rec = f"{pct_val}% of limit. Monitor."
             else:
                 continue
 
@@ -495,13 +495,13 @@ class SessionReportDialog(QDialog):
             sess = self._session_map.get(acc.id)
             if lvl >= 5:
                 sev = "HIGH"
-                rec = "Limits wysoki. Rozważ usunięcie zużytych źródeł i podmianę na nowe."
+                rec = "Limits high. Consider removing exhausted sources and replacing with new ones."
             elif lvl >= 3:
                 sev = "MEDIUM"
-                rec = "Limits średni. Monitoruj performance źródeł."
+                rec = "Limits medium. Monitor source performance."
             else:
                 sev = "LOW"
-                rec = "Limits niski. Normalna praca."
+                rec = "Limits low. Normal operation."
 
             rows.append([
                 sev,
@@ -527,9 +527,9 @@ class SessionReportDialog(QDialog):
         if hw:
             actions.append([
                 "CRITICAL",
-                f"Wymiana urządzeń z problemem hardware: {', '.join(d[1] for d in hw)}",
+                f"Replace hardware-problem devices: {', '.join(d[1] for d in hw)}",
                 str(len(hw)),
-                "Odłącz urządzenia, przenieś konta na zapasowe.",
+                "Disconnect devices, move accounts to spares.",
             ])
 
         dev_crit = [d for d in self._devices_data
@@ -537,27 +537,27 @@ class SessionReportDialog(QDialog):
         if dev_crit:
             actions.append([
                 "CRITICAL",
-                f"Urządzenia offline z aktywnymi kontami: {', '.join(d[1] for d in dev_crit)}",
+                f"Offline devices with active accounts: {', '.join(d[1] for d in dev_crit)}",
                 str(sum(int(d[3]) for d in dev_crit)),
-                "Restart Onimator, sprawdź kabel/WiFi/zasilanie.",
+                "Restart Onimator, check cable/WiFi/power.",
             ])
 
         zero_crit = [z for z in self._zero_data if z[0] == "CRITICAL"]
         if zero_crit:
             actions.append([
                 "CRITICAL",
-                "Konta bez akcji na offline device w aktywnym slocie",
+                "Accounts with no actions on offline device in active slot",
                 str(len(zero_crit)),
-                "Napraw urządzenie najpierw, potem sprawdź konta.",
+                "Fix device first, then check accounts.",
             ])
 
         tb_crit = [t for t in self._tb_data if t[0] == "CRITICAL"]
         if tb_crit:
             actions.append([
                 "CRITICAL",
-                f"TB5 — konta do przeniesienia: {', '.join(t[1] for t in tb_crit)}",
+                f"TB5 — accounts to move: {', '.join(t[1] for t in tb_crit)}",
                 str(len(tb_crit)),
-                "Przenieś na inne urządzenie, warmup od zera.",
+                "Move to another device, restart warmup from zero.",
             ])
 
         # --- HIGH ---
@@ -565,45 +565,45 @@ class SessionReportDialog(QDialog):
         if zero_high:
             actions.append([
                 "HIGH",
-                "Konta bez akcji w aktywnym slocie (device ok)",
+                "Accounts with no actions in active slot (device ok)",
                 str(len(zero_high)),
-                "Sprawdź na urządzeniu: popup, 2FA, wylogowanie, action block.",
+                "Check on device: popup, 2FA, logout, action block.",
             ])
 
         tb_high = [t for t in self._tb_data if t[0] == "HIGH"]
         if tb_high:
             actions.append([
                 "HIGH",
-                f"TB3/TB4 — konta z action blockiem",
+                "TB3/TB4 — accounts with action block",
                 str(len(tb_high)),
-                "Sprawdź czy blokada minęła, zastosuj warmup wg procedury TB.",
+                "Check if block has expired, apply warmup per TB procedure.",
             ])
 
         review_high = [r for r in self._review_data if r[0] == "HIGH"]
         if review_high:
             actions.append([
                 "HIGH",
-                "Konta review z blockiem/banem",
+                "Review accounts with block/ban",
                 str(len(review_high)),
-                "Sprawdź status konta, clear flag po rozwiązaniu.",
+                "Check account status, clear flag after resolution.",
             ])
 
         follow_high = [f for f in self._low_follow_data if f[0] == "HIGH"]
         if follow_high:
             actions.append([
                 "HIGH",
-                "Konta z follow=0 ale innymi aktywnymi akcjami",
+                "Accounts with follow=0 but other active actions",
                 str(len(follow_high)),
-                "Sprawdź sources.txt i popup/block specyficzny dla follow.",
+                "Check sources.txt and follow-specific popup/block.",
             ])
 
         limits_high = [l for l in self._limits_data if l[0] == "HIGH"]
         if limits_high:
             actions.append([
                 "HIGH",
-                f"Konta z high limits (>=5)",
+                "Accounts with high limits (>=5)",
                 str(len(limits_high)),
-                "Rozważ usunięcie zużytych źródeł, podmiana na nowe.",
+                "Consider removing exhausted sources, replace with new ones.",
             ])
 
         # --- MEDIUM ---
@@ -611,45 +611,45 @@ class SessionReportDialog(QDialog):
         if zero_disabled:
             actions.append([
                 "MEDIUM",
-                "Konta z wyłączonym follow",
+                "Accounts with follow disabled",
                 str(len(zero_disabled)),
-                "Re-enable lub udokumentuj powód (cooldown, ban).",
+                "Re-enable or document reason (cooldown, ban).",
             ])
 
         follow_med = [f for f in self._low_follow_data if f[0] == "MEDIUM"]
         if follow_med:
             actions.append([
                 "MEDIUM",
-                "Konta z follow < 40",
+                "Accounts with follow < 40",
                 str(len(follow_med)),
-                "Zwiększ uwagę, możliwy throttle. Sprawdź logi bota.",
+                "Increase attention, possible throttle. Check bot logs.",
             ])
 
         tb_med = [t for t in self._tb_data if t[0] == "MEDIUM"]
         if tb_med:
             actions.append([
                 "MEDIUM",
-                f"TB1/TB2 — konta z lekkim action blockiem",
+                "TB1/TB2 — accounts with mild action block",
                 str(len(tb_med)),
-                "Zastosuj warmup wg procedury TB1/TB2.",
+                "Apply warmup per TB1/TB2 procedure.",
             ])
 
         like_med = [l for l in self._low_like_data if l[0] == "MEDIUM"]
         if like_med:
             actions.append([
                 "MEDIUM",
-                "Konta z like=0 mimo aktywności",
+                "Accounts with like=0 despite activity",
                 str(len(like_med)),
-                "Sprawdź like sources i ustawienia likepost.",
+                "Check like sources and likepost settings.",
             ])
 
         review_other = [r for r in self._review_data if r[0] != "HIGH"]
         if review_other:
             actions.append([
                 "MEDIUM" if any(r[0] == "MEDIUM" for r in review_other) else "LOW",
-                "Konta review do przeglądu",
+                "Review accounts pending decision",
                 str(len(review_other)),
-                "Przejrzyj notatki, podejmij decyzję.",
+                "Review notes, make a decision.",
             ])
 
         # --- LOW ---
@@ -657,9 +657,9 @@ class SessionReportDialog(QDialog):
         if follow_low:
             actions.append([
                 "LOW",
-                "Konta z follow < 50% limitu",
+                "Accounts with follow < 50% of limit",
                 str(len(follow_low)),
-                "Monitor. Sprawdź przy następnym przeglądzie.",
+                "Monitor. Check at next review.",
             ])
 
         actions.sort(key=lambda r: _SEV_RANK.get(r[0], 9))

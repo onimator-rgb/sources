@@ -252,9 +252,9 @@ class RecommendationService:
             target_type=TARGET_ACCOUNT,
             target_id=acc.username,
             target_label=label,
-            reason="TB5 — konto wymaga przeniesienia",
+            reason="TB5 — account requires relocation",
             suggested_action=(
-                "Przenieś konto na inne urządzenie, warmup od zera"
+                "Move account to another device, restart warmup"
             ),
             account_id=acc.id,
             metadata={"tb_level": level, "device_name": acc.device_name},
@@ -272,9 +272,9 @@ class RecommendationService:
             target_type=TARGET_ACCOUNT,
             target_id=acc.username,
             target_label=label,
-            reason=f"limits {level} — źródła wymagają wymiany",
+            reason=f"limits {level} — sources need replacement",
             suggested_action=(
-                "Wymień najbardziej zużyte źródła, usuń słabe źródła"
+                "Replace most exhausted sources, delete weak sources"
             ),
             account_id=acc.id,
             metadata={"limits_level": level},
@@ -293,8 +293,8 @@ class RecommendationService:
                 target_type=TARGET_ACCOUNT,
                 target_id=acc.username,
                 target_label=label,
-                reason="0 aktywnych źródeł",
-                suggested_action="Dodaj źródła do sources.txt",
+                reason="0 active sources",
+                suggested_action="Add sources to sources.txt",
                 account_id=acc.id,
                 metadata={"active_sources": 0, "quality_sources": 0},
             )
@@ -308,10 +308,10 @@ class RecommendationService:
                 target_id=acc.username,
                 target_label=label,
                 reason=(
-                    f"{src_count} aktywnych źródeł (min={min_warn}), "
+                    f"{src_count} active sources (min={min_warn}), "
                     f"{quality} quality"
                 ),
-                suggested_action="Dodaj nowe źródła / podmień zużyte",
+                suggested_action="Add new sources / replace exhausted ones",
                 account_id=acc.id,
                 metadata={
                     "active_sources": src_count,
@@ -328,10 +328,10 @@ class RecommendationService:
                 target_id=acc.username,
                 target_label=label,
                 reason=(
-                    f"{src_count} aktywnych źródeł ale 0 quality "
-                    f"(z {snap.total_sources} analizowanych)"
+                    f"{src_count} active sources but 0 quality "
+                    f"(out of {snap.total_sources} analyzed)"
                 ),
-                suggested_action="Podmień słabe źródła na lepsze",
+                suggested_action="Replace weak sources with better ones",
                 account_id=acc.id,
                 metadata={
                     "active_sources": src_count,
@@ -362,10 +362,10 @@ class RecommendationService:
             target_id=acc.username,
             target_label=label,
             reason=(
-                "0 akcji w aktywnym slocie, urządzenie running"
+                "0 actions in active slot, device running"
             ),
             suggested_action=(
-                "Sprawdź konto: popup, 2FA, wylogowanie, action block"
+                "Check account: popup, 2FA, logout, action block"
             ),
             account_id=acc.id,
             metadata={
@@ -396,11 +396,11 @@ class RecommendationService:
             target_id=acc.username,
             target_label=label,
             reason=(
-                f"follow={sess.follow_count} ale like=0 "
+                f"follow={sess.follow_count} but like=0 "
                 f"(limit={like_limit})"
             ),
             suggested_action=(
-                "Sprawdź like sources, dodaj podobną społeczność"
+                "Check like sources, add similar community"
             ),
             account_id=acc.id,
             metadata={

@@ -61,3 +61,10 @@ logs/
 *.png
 *.lnk
 .claude/settings.local.json
+
+# -----------------------------------------------
+# License keys (private key must NEVER be committed)
+# -----------------------------------------------
+.license_private_key
+scripts/.license_private_key
+license_*.key

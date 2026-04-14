@@ -148,31 +148,51 @@ class SettingsTab(QWidget):
 
         outer.addWidget(auto_group)
 
-        # -- Updates group --
-        upd_group = QGroupBox("Updates")
-        upd_form = QFormLayout(upd_group)
-        upd_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        # -- Auto-Fix (Self-Healing) group --
+        af_group = QGroupBox("Auto-Fix (Self-Healing)")
+        af_form = QFormLayout(af_group)
+        af_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self._update_check = QCheckBox("Check for updates on startup")
-        upd_form.addRow("", self._update_check)
+        self._af_source_cleanup = QCheckBox("Detect weak sources after Scan")
+        self._af_source_cleanup.setToolTip(
+            "Detect sources with wFBR near 0% and sufficient follow data.\n"
+            "Proposals are shown for operator review before any removal.\n"
+            "Always creates a backup before removing."
+        )
+        af_form.addRow("", self._af_source_cleanup)
 
-        self._update_url_edit = QLineEdit()
-        self._update_url_edit.setFixedWidth(400)
-        self._update_url_edit.setPlaceholderText("https://your-server.com/oh/update.json")
-        self._update_url_edit.setToolTip("URL to the update.json file on your server")
-        upd_form.addRow("Update URL:", self._update_url_edit)
+        self._af_tb_escalation = QCheckBox("Detect TB escalation candidates")
+        self._af_tb_escalation.setToolTip(
+            "Detect accounts with 0 actions for 2+ consecutive days\n"
+            "in their active time slot. Proposed for operator review.\n"
+            "Accounts reaching TB4+ are also flagged for review."
+        )
+        af_form.addRow("", self._af_tb_escalation)
 
-        upd_hint = QLabel("The update URL should point to a JSON file with version info and download link.")
-        upd_hint.setWordWrap(True)
-        upd_hint.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
-        upd_form.addRow("", upd_hint)
+        self._af_dead_device = QCheckBox("Detect offline devices")
+        self._af_dead_device.setToolTip(
+            "After Scan & Sync, flag devices where all accounts\n"
+            "had 0 actions today. Shown as alert in Cockpit."
+        )
+        af_form.addRow("", self._af_dead_device)
 
-        self._check_now_btn = QPushButton("Check Now")
-        self._check_now_btn.setFixedHeight(32)
-        self._check_now_btn.clicked.connect(self._on_check_update_now)
-        upd_form.addRow("", self._check_now_btn)
+        self._af_duplicate_cleanup = QCheckBox("Detect duplicate sources")
+        self._af_duplicate_cleanup.setToolTip(
+            "Detect duplicate entries (same source, different casing)\n"
+            "in sources.txt files. Proposed for operator review.\n"
+            "Creates backup before changes."
+        )
+        af_form.addRow("", self._af_duplicate_cleanup)
 
-        outer.addWidget(upd_group)
+        af_hint = QLabel(
+            "Issues are detected after each Scan & Sync and shown for operator review. "
+            "No changes are made without explicit approval."
+        )
+        af_hint.setWordWrap(True)
+        af_hint.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        af_form.addRow("", af_hint)
+
+        outer.addWidget(af_group)
 
         # -- Appearance group --
         app_group = QGroupBox("Appearance")
@@ -187,6 +207,20 @@ class SettingsTab(QWidget):
             "Change takes effect after restarting OH."
         )
         app_form.addRow("Theme:", self._theme_combo)
+
+        self._help_tips_check = QCheckBox("Show context help buttons (?)")
+        self._help_tips_check.setToolTip(
+            "Show contextual help buttons throughout the interface"
+        )
+        app_form.addRow("", self._help_tips_check)
+
+        self._reset_tour_btn = QPushButton("Restart Guided Tour")
+        self._reset_tour_btn.setFixedWidth(160)
+        self._reset_tour_btn.setToolTip(
+            "Show the guided tour again from the brand bar"
+        )
+        self._reset_tour_btn.clicked.connect(self._on_reset_tour)
+        app_form.addRow("Guided Tour:", self._reset_tour_btn)
 
         outer.addWidget(app_group)
 
@@ -305,6 +339,21 @@ class SettingsTab(QWidget):
 
         outer.addWidget(tpl_group)
 
+        # -- Warmup Templates group --
+        wt_group = QGroupBox("Warmup Templates")
+        wt_lo = QVBoxLayout(wt_group)
+        wt_desc = QLabel("Manage warmup presets used for account onboarding.")
+        wt_desc.setWordWrap(True)
+        wt_desc.setStyleSheet(f"color: {sc('text_secondary').name()}; font-size: 11px;")
+        wt_lo.addWidget(wt_desc)
+
+        self._warmup_templates_btn = QPushButton("Manage Warmup Templates")
+        self._warmup_templates_btn.setFixedHeight(32)
+        self._warmup_templates_btn.clicked.connect(self._on_manage_warmup_templates)
+        wt_lo.addWidget(self._warmup_templates_btn)
+
+        outer.addWidget(wt_group)
+
         # -- Error Reporting group --
         err_group = QGroupBox("Error Reporting")
         err_form = QFormLayout(err_group)
@@ -360,10 +409,13 @@ class SettingsTab(QWidget):
             self._auto_scan_interval.setCurrentIndex(idx)
         self._hiker_key_edit.setText(self._settings.get("hiker_api_key") or "")
         self._gemini_key_edit.setText(self._settings.get("gemini_api_key") or "")
-        self._update_check.setChecked(self._settings.get("update_check_enabled") == "1")
-        self._update_url_edit.setText(self._settings.get("update_check_url") or "")
         self._report_endpoint_edit.setText(self._settings.get("report_endpoint") or "")
         self._auto_crash_check.setChecked(self._settings.get("auto_send_crashes") != "0")
+        self._af_source_cleanup.setChecked(self._settings.get("auto_fix_source_cleanup") != "0")
+        self._af_tb_escalation.setChecked(self._settings.get("auto_fix_tb_escalation") != "0")
+        self._af_dead_device.setChecked(self._settings.get("auto_fix_dead_device_alert") != "0")
+        self._af_duplicate_cleanup.setChecked(self._settings.get("auto_fix_duplicate_cleanup") != "0")
+        self._help_tips_check.setChecked((self._settings.get("show_help_tips") or "1") != "0")
         self._load_blacklist()
 
     def _save(self) -> None:
@@ -378,14 +430,22 @@ class SettingsTab(QWidget):
         self._settings.set("auto_scan_enabled", "1" if self._auto_scan_check.isChecked() else "0")
         self._settings.set("auto_scan_interval_hours", self._auto_scan_interval.currentText())
 
+        self._settings.set("auto_fix_source_cleanup", "1" if self._af_source_cleanup.isChecked() else "0")
+        self._settings.set("auto_fix_tb_escalation", "1" if self._af_tb_escalation.isChecked() else "0")
+        self._settings.set("auto_fix_dead_device_alert", "1" if self._af_dead_device.isChecked() else "0")
+        self._settings.set("auto_fix_duplicate_cleanup", "1" if self._af_duplicate_cleanup.isChecked() else "0")
+
         self._settings.set("hiker_api_key",  self._hiker_key_edit.text().strip())
         self._settings.set("gemini_api_key", self._gemini_key_edit.text().strip())
 
-        self._settings.set("update_check_enabled", "1" if self._update_check.isChecked() else "0")
-        self._settings.set("update_check_url", self._update_url_edit.text().strip())
 
         self._settings.set("report_endpoint", self._report_endpoint_edit.text().strip())
         self._settings.set("auto_send_crashes", "1" if self._auto_crash_check.isChecked() else "0")
+
+        show_tips = self._help_tips_check.isChecked()
+        self._settings.set("show_help_tips", "1" if show_tips else "0")
+        from oh.ui.help_button import HelpButton
+        HelpButton.set_all_visible(show_tips)
 
         new_theme = self._theme_combo.currentText()
         old_theme = self._settings.get("theme") or "dark"
@@ -466,29 +526,17 @@ class SettingsTab(QWidget):
         self._index_status.setText(f"Error: {error_msg}")
         QMessageBox.critical(self, "Indexing Failed", f"Source indexing failed:\n\n{error_msg}")
 
+
     # ------------------------------------------------------------------
-    # Update Check
+    # Guided Tour
     # ------------------------------------------------------------------
 
-    def _on_check_update_now(self) -> None:
-        url = self._update_url_edit.text().strip()
-        if not url:
-            QMessageBox.warning(self, "No URL", "Enter an update URL first.")
-            return
-
-        from oh.services.update_service import UpdateService
-        svc = UpdateService(url)
-        info = svc.check_for_update()
-
-        if info:
-            from oh.ui.update_dialog import UpdateDialog
-            dlg = UpdateDialog(self, svc, info)
-            dlg.exec()
-        else:
-            QMessageBox.information(
-                self, "No Update",
-                f"You are running the latest version ({svc.current_version}).",
-            )
+    def _on_reset_tour(self) -> None:
+        self._settings.set("tour_completed", "0")
+        QMessageBox.information(
+            self, "Tour Reset",
+            "The guided tour will be available again from the brand bar."
+        )
 
     # ------------------------------------------------------------------
     # Campaign Templates
@@ -500,6 +548,18 @@ class SettingsTab(QWidget):
         conn = self._settings._conn
         repo = CampaignTemplateRepository(conn)
         dlg = CampaignTemplatesDialog(repo, parent=self)
+        dlg.exec()
+
+    # ------------------------------------------------------------------
+    # Warmup Templates
+    # ------------------------------------------------------------------
+
+    def _on_manage_warmup_templates(self) -> None:
+        from oh.ui.warmup_templates_dialog import WarmupTemplatesDialog
+        from oh.repositories.warmup_template_repo import WarmupTemplateRepository
+        conn = self._settings._conn
+        repo = WarmupTemplateRepository(conn)
+        dlg = WarmupTemplatesDialog(repo, parent=self)
         dlg.exec()
 
     # ------------------------------------------------------------------

@@ -48,17 +48,18 @@ logger = logging.getLogger(__name__)
 
 COL_SOURCE     = 0
 COL_STATUS     = 1
-COL_ACTIVE     = 2   # sources.txt
-COL_HISTORY    = 3   # data.db
-COL_FOLLOWS    = 4
-COL_FOLLOWBACK = 5
-COL_FBR        = 6
-COL_QUALITY    = 7
-COL_USED       = 8   # processed user count from sources/{name}.db
-COL_USED_PCT   = 9   # used_count / total_source_followers * 100
+COL_ADDED      = 2   # date source was first added
+COL_ACTIVE     = 3   # sources.txt
+COL_HISTORY    = 4   # data.db
+COL_FOLLOWS    = 5
+COL_FOLLOWBACK = 6
+COL_FBR        = 7
+COL_QUALITY    = 8
+COL_USED       = 9   # processed user count from sources/{name}.db
+COL_USED_PCT   = 10  # used_count / total_source_followers * 100
 
 _HEADERS = [
-    "Source", "Status", "sources.txt", "data.db",
+    "Source", "Status", "Added", "sources.txt", "data.db",
     "Follows", "Follow-backs", "FBR %", "Quality", "Used", "Used %",
 ]
 
@@ -110,6 +111,7 @@ class SourceDialog(QDialog):
         usage: Optional[SourceUsageResult] = None,
         on_delete: Optional[Callable] = None,
         on_cleanup: Optional[Callable] = None,
+        source_dates: Optional[dict] = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -118,6 +120,7 @@ class SourceDialog(QDialog):
         self._usage = usage
         self._on_delete = on_delete
         self._on_cleanup = on_cleanup
+        self._source_dates = source_dates or {}  # {lowercase_name: "YYYY-MM-DD"}
 
         # Pre-build FBR lookup keyed by normalized (strip + lower) name so that
         # minor casing/whitespace differences between sources.txt and data.db
@@ -163,7 +166,7 @@ class SourceDialog(QDialog):
         self.setWindowTitle(
             f"Sources & FBR — {inspection.username}  [{short_device}]"
         )
-        self.setMinimumSize(1020, 540)
+        self.setMinimumSize(1100, 540)
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -356,6 +359,7 @@ class SourceDialog(QDialog):
         t.setHorizontalHeaderLabels(_HEADERS)
         t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        t.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         t.setAlternatingRowColors(True)
         t.verticalHeader().setVisible(False)
         t.setShowGrid(True)
@@ -364,12 +368,13 @@ class SourceDialog(QDialog):
 
         hdr = t.horizontalHeader()
         hdr.setSectionResizeMode(COL_SOURCE, QHeaderView.ResizeMode.Stretch)
-        for col in (COL_STATUS, COL_ACTIVE, COL_HISTORY,
+        for col in (COL_STATUS, COL_ADDED, COL_ACTIVE, COL_HISTORY,
                     COL_FOLLOWS, COL_FOLLOWBACK, COL_FBR, COL_QUALITY,
                     COL_USED, COL_USED_PCT):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
 
         t.setColumnWidth(COL_STATUS,     145)
+        t.setColumnWidth(COL_ADDED,       80)
         t.setColumnWidth(COL_ACTIVE,      85)
         t.setColumnWidth(COL_HISTORY,     65)
         t.setColumnWidth(COL_FOLLOWS,     75)
@@ -465,6 +470,15 @@ class SourceDialog(QDialog):
         status_item.setTextAlignment(center)
         status_item.setForeground(_STATUS_COLOR[src.status])
         t.setItem(row, COL_STATUS, status_item)
+
+        # Date added (from source_assignments.created_at)
+        key_lower = src.source_name.strip().lower()
+        added_date = self._source_dates.get(key_lower, "\u2014")
+        added_item = QTableWidgetItem(added_date)
+        added_item.setTextAlignment(center)
+        if added_date == "\u2014":
+            added_item.setForeground(_C_LOW_FBR)
+        t.setItem(row, COL_ADDED, added_item)
 
         # File presence
         t.setItem(row, COL_ACTIVE,  _bool_item(src.is_active))
@@ -575,13 +589,14 @@ class SourceDialog(QDialog):
         lo.setContentsMargins(0, 4, 0, 0)
 
         if self._on_delete is not None:
-            self._delete_btn = QPushButton("Delete Selected Source")
-            self._delete_btn.setFixedWidth(180)
+            self._delete_btn = QPushButton("Delete Selected")
+            self._delete_btn.setFixedWidth(160)
             self._delete_btn.setEnabled(False)
             self._delete_btn.setStyleSheet(
                 "QPushButton:enabled { color: #e05555; }"
                 "QPushButton:enabled:hover { background: #3a1a1a; }"
             )
+            self._delete_btn.setToolTip("Delete selected sources (multi-select with Ctrl/Shift)")
             self._delete_btn.clicked.connect(self._on_delete_clicked)
             lo.addWidget(self._delete_btn)
 
@@ -606,64 +621,84 @@ class SourceDialog(QDialog):
         """Enable/disable the Delete button based on table selection."""
         if not hasattr(self, "_delete_btn"):
             return
-        selected = self._source_table.selectedItems()
-        self._delete_btn.setEnabled(bool(selected))
+        selected_rows = self._source_table.selectionModel().selectedRows()
+        count = len(selected_rows)
+        self._delete_btn.setEnabled(count > 0)
+        if count > 1:
+            self._delete_btn.setText(f"Delete Selected ({count})")
+        else:
+            self._delete_btn.setText("Delete Selected")
 
     def _on_delete_clicked(self) -> None:
-        """Handle Delete Selected Source button click."""
+        """Handle Delete Selected button click — supports multi-select."""
         if self._on_delete is None:
             return
 
-        selected = self._source_table.selectedItems()
-        if not selected:
+        selected_rows = self._source_table.selectionModel().selectedRows()
+        if not selected_rows:
             return
 
-        row = selected[0].row()
-        source_item = self._source_table.item(row, COL_SOURCE)
-        if not source_item:
-            return
+        # Collect unique source names from selected rows
+        sources_to_delete = []
+        row_map = {}  # source_name -> row index
+        for idx in selected_rows:
+            row = idx.row()
+            source_item = self._source_table.item(row, COL_SOURCE)
+            if not source_item:
+                continue
+            name = source_item.text().strip()
+            if not name or name.endswith("(deleted)"):
+                continue
+            sources_to_delete.append(name)
+            row_map[name] = row
 
-        source_name = source_item.text()
-        if not source_name:
+        if not sources_to_delete:
             return
 
         self._delete_btn.setEnabled(False)
-        try:
-            result = self._on_delete(source_name)
-            if result is None:
-                return  # user cancelled confirmation
-            if result.accounts_removed > 0:
-                # Gray out the deleted row
-                for col in range(self._source_table.columnCount()):
-                    cell = self._source_table.item(row, col)
-                    if cell:
-                        cell.setForeground(_C_LOW_FBR)
-                source_item.setText(f"{source_name}  (deleted)")
-                QMessageBox.information(
-                    self,
-                    "Source Deleted",
-                    f"'{source_name}' removed from this account.\n"
-                    "This action can be reverted from History in the Sources tab.",
-                )
-            elif result.accounts_not_found > 0:
-                QMessageBox.information(
-                    self,
-                    "Source Already Absent",
-                    f"'{source_name}' was not found in sources.txt.\n"
-                    "It may have been removed externally.",
-                )
-            elif result.errors:
-                QMessageBox.warning(
-                    self,
-                    "Delete Failed",
-                    f"Could not delete '{source_name}':\n\n" + "\n".join(result.errors),
-                )
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Delete Error",
-                f"Error deleting '{source_name}':\n\n{e}",
-            )
+
+        deleted = []
+        not_found = []
+        errors = []
+
+        for source_name in sources_to_delete:
+            try:
+                result = self._on_delete(source_name)
+                if result is None:
+                    # User cancelled — stop entire batch
+                    break
+                if result.accounts_removed > 0:
+                    deleted.append(source_name)
+                    # Gray out the deleted row
+                    row = row_map[source_name]
+                    for col in range(self._source_table.columnCount()):
+                        cell = self._source_table.item(row, col)
+                        if cell:
+                            cell.setForeground(_C_LOW_FBR)
+                    si = self._source_table.item(row, COL_SOURCE)
+                    if si:
+                        si.setText(f"{source_name}  (deleted)")
+                elif result.accounts_not_found > 0:
+                    not_found.append(source_name)
+                elif result.errors:
+                    errors.extend(result.errors)
+            except Exception as e:
+                errors.append(f"{source_name}: {e}")
+
+        # Summary message
+        parts = []
+        if deleted:
+            parts.append(f"Deleted {len(deleted)} source(s).")
+        if not_found:
+            parts.append(f"{len(not_found)} already absent.")
+        if errors:
+            parts.append(f"{len(errors)} error(s).")
+
+        if parts:
+            msg = "\n".join(parts)
+            if deleted:
+                msg += "\n\nRevert available in Sources tab \u2192 History."
+            QMessageBox.information(self, "Delete Results", msg)
 
     def _on_cleanup_clicked(self) -> None:
         """Handle Remove Non-Quality Sources button click."""

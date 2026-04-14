@@ -17,6 +17,7 @@ Layout:
   │  Status bar                                                     │
   └─────────────────────────────────────────────────────────────────┘
 """
+import os
 import subprocess
 import logging
 import sqlite3
@@ -44,6 +45,7 @@ from oh.modules.fbr_calculator import FBRCalculator
 from oh.modules.source_inspector import SourceInspector
 from oh.modules.source_usage_reader import SourceUsageReader
 from oh.repositories.account_repo import AccountRepository
+from oh.repositories.source_assignment_repo import SourceAssignmentRepository
 from oh.repositories.settings_repo import SettingsRepository
 from oh.repositories.sync_repo import SyncRepository
 from oh.services.account_health_service import AccountHealthService
@@ -54,6 +56,7 @@ from oh.services.session_service import SessionService
 from oh.services.operator_action_service import OperatorActionService
 from oh.services.recommendation_service import RecommendationService
 from oh.services.source_delete_service import SourceDeleteService
+from oh.services.target_splitter_service import TargetSplitterService
 from oh.resources import asset_path, asset_exists
 from oh.ui.account_detail_panel import AccountDetailPanel
 from oh.ui.device_fleet_tab import DeviceFleetTab
@@ -61,8 +64,11 @@ from oh.ui.settings_tab import SettingsTab
 from oh.ui.source_dialog import SourceDialog
 from oh.ui.source_profiles_tab import SourceProfilesTab
 from oh.ui.sources_tab import SourcesTab
+from oh.ui.help_button import HelpButton
 from oh.ui.workers import WorkerThread
 from oh.repositories.source_profile_repo import SourceProfileRepository
+from oh.services.settings_copier_service import SettingsCopierService
+from oh.services.warmup_template_service import WarmupTemplateService
 
 logger = logging.getLogger(__name__)
 
@@ -70,41 +76,42 @@ logger = logging.getLogger(__name__)
 # Table column indexes
 # ---------------------------------------------------------------------------
 
-COL_USERNAME    = 0
-COL_DEVICE      = 1
-COL_HOURS       = 2   # working hours (start_time - end_time)
-COL_STATUS      = 3
-COL_TAGS        = 4
-COL_FOLLOW      = 5
-COL_UNFOLLOW    = 6
-COL_LIMIT       = 7
-COL_FOLLOW_TODAY = 8
-COL_LIKE_TODAY   = 9
-COL_FOLLOW_LIM   = 10
-COL_LIKE_LIM     = 11
-COL_REVIEW       = 12
-COL_DATA_DB     = 13
-COL_SOURCES_TXT = 14
-COL_DISCOVERED  = 15
-COL_LAST_SEEN   = 16
-COL_SRC_COUNT   = 17   # active source count — from source_assignments
-COL_FBR_QUALITY = 18   # "3/12" quality/total — from latest snapshot
-COL_FBR_BEST    = 19   # best FBR % — from latest snapshot
-COL_FBR_DATE    = 20   # date of last FBR analysis
-COL_HEALTH      = 21   # composite health score (0-100)
-COL_TREND       = 22   # sparkline trend
-COL_BLOCK       = 23   # block/ban indicator
-COL_GROUP       = 24   # account group name(s)
-COL_ACTIONS     = 25
+COL_TIMESLOT    = 0   # slot number 1-4 (derived from working hours)
+COL_USERNAME    = 1
+COL_DEVICE      = 2
+COL_HOURS       = 3   # working hours (start_time - end_time)
+COL_STATUS      = 4
+COL_TAGS        = 5
+COL_FOLLOW      = 6
+COL_UNFOLLOW    = 7
+COL_LIMIT       = 8
+COL_FOLLOW_TODAY = 9
+COL_LIKE_TODAY   = 10
+COL_FOLLOW_LIM   = 11
+COL_LIKE_LIM     = 12
+COL_REVIEW       = 13
+COL_DATA_DB     = 14
+COL_SOURCES_TXT = 15
+COL_DISCOVERED  = 16
+COL_LAST_SEEN   = 17
+COL_SRC_COUNT   = 18   # active source count — from source_assignments
+COL_FBR_QUALITY = 19   # "3/12" quality/total — from latest snapshot
+COL_FBR_BEST    = 20   # best FBR % — from latest snapshot
+COL_FBR_DATE    = 21   # date of last FBR analysis
+COL_HEALTH      = 22   # composite health score (0-100)
+COL_TREND       = 23   # sparkline trend
+COL_BLOCK       = 24   # block/ban indicator
+COL_GROUP       = 25   # account group name(s)
+COL_ACTIONS     = 26
 
 COLUMN_HEADERS = [
-    "Username", "Device", "Hours", "Status", "Tags",
-    "Follow", "Unfollow", "Limit/Day",
-    "Follow Today", "Like Today", "F. Limit", "L. Limit", "Review",
-    "Data DB", "Sources.txt",
+    "Slot", "Username", "Device", "Hours", "Status", "Tags",
+    "Fol", "Unf", "Lmt/D",
+    "Fol Today", "Like Today", "F.Lmt", "L.Lmt", "Rev",
+    "Data D", "Sources.tx",
     "Discovered", "Last Seen",
-    "Active Sources",
-    "Quality/Total", "Best FBR %", "Last FBR",
+    "Actve Src",
+    "Qlty/Tot", "Best FBR%", "Last FBR",
     "Health", "Trend", "Block", "Group",
     "Actions",
 ]
@@ -175,6 +182,17 @@ _ACTIVITY_FILTER_ZERO     = "0 actions today"
 _ACTIVITY_FILTER_HAS      = "Has actions"
 _ACTIVITY_FILTER_BLOCKED  = "Blocked"
 
+_TIMESLOT_FILTER_ALL = "All slots"
+_TIMESLOT_FILTER_1   = "Slot 1 (0-6)"
+_TIMESLOT_FILTER_2   = "Slot 2 (6-12)"
+_TIMESLOT_FILTER_3   = "Slot 3 (12-18)"
+_TIMESLOT_FILTER_4   = "Slot 4 (18-24)"
+
+_HEALTH_FILTER_ALL    = "All health"
+_HEALTH_FILTER_GREEN  = "Green (70+)"
+_HEALTH_FILTER_YELLOW = "Yellow (40-69)"
+_HEALTH_FILTER_RED    = "Red (<40)"
+
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -198,8 +216,14 @@ class MainWindow(QMainWindow):
         account_group_service=None,
         account_group_repo=None,
         trend_service=None,
+        auto_fix_service=None,
+        settings_copier_service: Optional[SettingsCopierService] = None,
+        warmup_template_service: Optional[WarmupTemplateService] = None,
     ) -> None:
         super().__init__()
+        self._warmup_template_service = warmup_template_service
+        self._settings_copier_service = settings_copier_service
+        self._auto_fix_service        = auto_fix_service
         self._error_report_service    = error_report_service
         self._block_detection_service = block_detection_service
         self._account_group_service   = account_group_service
@@ -241,11 +265,19 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("OH — Operational Hub")
         self.setMinimumSize(1100, 650)
 
+        self._target_splitter_service = TargetSplitterService(
+            assignment_repo=SourceAssignmentRepository(conn),
+            operator_action_repo=operator_action_repo,
+            account_repo=self._accounts,
+        )
+
         self._sources_tab  = SourcesTab(
             global_sources_service, source_delete_service,
             bulk_discovery_service=self._bulk_discovery_service,
             settings_repo=self._settings,
             conn=conn,
+            target_splitter_service=self._target_splitter_service,
+            account_group_repo=self._account_group_repo,
         )
         self._settings_tab = SettingsTab(
             self._settings,
@@ -270,6 +302,9 @@ class MainWindow(QMainWindow):
         # Check for updates after 3 second delay (don't block startup)
         QTimer.singleShot(3000, self._check_for_updates)
 
+        # Onboarding + What's New (after 500ms to let window render)
+        QTimer.singleShot(500, self._show_startup_dialogs)
+
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
@@ -286,6 +321,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(self._make_settings_bar())
 
         self._tabs = QTabWidget()
+        self._tabs.setObjectName("tabWidget")
         self._tabs.addTab(self._make_accounts_page(), "Accounts")
         self._tabs.addTab(self._sources_tab, "Sources")
         self._tabs.addTab(self._source_profiles_tab, "Source Profiles")
@@ -382,6 +418,33 @@ class MainWindow(QMainWindow):
         lo.addWidget(title_lbl)
         lo.addStretch()
 
+        # Brand bar button style
+        from oh.ui.style import sc as _sc
+        _brand_btn_style = (
+            f"QPushButton {{ font-size: 10px; padding: 2px 10px; "
+            f"border: 1px solid {_sc('border').name()}; border-radius: 3px; "
+            f"color: {_sc('text_secondary').name()}; background: transparent; }}"
+            f"QPushButton:hover {{ background: {_sc('bg_note').name()}; "
+            f"color: {_sc('text').name()}; }}"
+        )
+
+        # Take a Tour button
+        tour_btn = QPushButton("Take a Tour")
+        tour_btn.setFixedHeight(22)
+        tour_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        tour_btn.setStyleSheet(_brand_btn_style)
+        tour_btn.clicked.connect(self._start_guided_tour)
+        lo.addWidget(tour_btn)
+
+        # Check for Updates button
+        update_btn = QPushButton("Check for Updates")
+        update_btn.setObjectName("checkUpdatesBtn")
+        update_btn.setFixedHeight(22)
+        update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        update_btn.setStyleSheet(_brand_btn_style)
+        update_btn.clicked.connect(self._on_check_for_updates_manual)
+        lo.addWidget(update_btn)
+
         try:
             from oh.version import BUILD_VERSION
             ver_text = f"build {BUILD_VERSION}"
@@ -436,6 +499,7 @@ class MainWindow(QMainWindow):
         _btn_policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         self._scan_btn = QPushButton("Scan && Sync")
+        self._scan_btn.setObjectName("scanBtn")
         self._scan_btn.setFixedHeight(34)
         self._scan_btn.setSizePolicy(_btn_policy)
         self._scan_btn.setToolTip(
@@ -474,6 +538,7 @@ class MainWindow(QMainWindow):
         self._last_sync_label.setStyleSheet(f"color: {sc('muted').name()}; font-size: 11px;")
 
         self._cockpit_btn = QPushButton("Cockpit")
+        self._cockpit_btn.setObjectName("cockpitBtn")
         self._cockpit_btn.setFixedHeight(34)
         self._cockpit_btn.setSizePolicy(_btn_policy)
         self._cockpit_btn.setToolTip("Daily operations overview")
@@ -510,11 +575,26 @@ class MainWindow(QMainWindow):
         self._report_problem_btn.clicked.connect(self._on_report_problem)
 
         lo.addWidget(self._cockpit_btn)
+        lo.addWidget(HelpButton(
+            "Daily operations overview. Open at the start of each shift "
+            "to see what needs attention.",
+        ))
         lo.addWidget(self._scan_btn)
         lo.addWidget(self._fbr_btn)
+        lo.addWidget(HelpButton(
+            "Computes Follow-Back Rate for all sources. Shows which "
+            "sources bring followers back.",
+        ))
         lo.addWidget(refresh_btn)
         lo.addWidget(self._report_btn)
+        lo.addWidget(HelpButton(
+            "Detailed analysis of today's bot activity across all accounts.",
+        ))
         lo.addWidget(self._recs_btn)
+        lo.addWidget(HelpButton(
+            "Automated recommendations sorted by priority. Reviews weak "
+            "sources, inactive accounts, and more.",
+        ))
         lo.addWidget(self._history_btn)
         lo.addWidget(self._export_btn)
         lo.addWidget(self._groups_btn)
@@ -522,10 +602,17 @@ class MainWindow(QMainWindow):
         lo.addWidget(self._busy_label, stretch=1)
         lo.addWidget(self._report_problem_btn)
         lo.addWidget(self._last_sync_label)
+
+        # Apply initial help button visibility
+        show_tips = (self._settings.get("show_help_tips") or "1") == "1"
+        if not show_tips:
+            HelpButton.set_all_visible(False)
+
         return w
 
     def _make_filter_bar(self) -> QWidget:
         w = QWidget()
+        w.setObjectName("filterBar")
         lo = QHBoxLayout(w)
         lo.setContentsMargins(0, 4, 0, 4)
         lo.setSpacing(4)
@@ -603,6 +690,32 @@ class MainWindow(QMainWindow):
         self._activity_filter.setMaximumWidth(140)
         self._activity_filter.currentIndexChanged.connect(self._apply_filter)
         lo.addWidget(self._activity_filter)
+
+        # Timeslot filter
+        lo.addWidget(QLabel("Slot:"))
+        self._timeslot_filter = QComboBox()
+        self._timeslot_filter.addItems([
+            _TIMESLOT_FILTER_ALL, _TIMESLOT_FILTER_1,
+            _TIMESLOT_FILTER_2, _TIMESLOT_FILTER_3, _TIMESLOT_FILTER_4,
+        ])
+        self._timeslot_filter.setMinimumWidth(70)
+        self._timeslot_filter.setMaximumWidth(120)
+        self._timeslot_filter.setToolTip("Filter by timeslot (derived from working hours)")
+        self._timeslot_filter.currentIndexChanged.connect(self._apply_filter)
+        lo.addWidget(self._timeslot_filter)
+
+        # Health filter
+        lo.addWidget(QLabel("Health:"))
+        self._health_filter = QComboBox()
+        self._health_filter.addItems([
+            _HEALTH_FILTER_ALL, _HEALTH_FILTER_GREEN,
+            _HEALTH_FILTER_YELLOW, _HEALTH_FILTER_RED,
+        ])
+        self._health_filter.setMinimumWidth(70)
+        self._health_filter.setMaximumWidth(120)
+        self._health_filter.setToolTip("Filter by health score color band")
+        self._health_filter.currentIndexChanged.connect(self._apply_filter)
+        lo.addWidget(self._health_filter)
 
         # Group filter
         lo.addWidget(QLabel("Group:"))
@@ -683,6 +796,12 @@ class MainWindow(QMainWindow):
         self._bulk_group_btn.setSizePolicy(_bp)
         self._bulk_group_btn.clicked.connect(lambda: self._bulk_action("assign_group"))
         lo.addWidget(self._bulk_group_btn)
+
+        self._bulk_warmup_btn = QPushButton("Apply Warmup")
+        self._bulk_warmup_btn.setFixedHeight(28)
+        self._bulk_warmup_btn.setSizePolicy(_bp)
+        self._bulk_warmup_btn.clicked.connect(self._on_bulk_warmup)
+        lo.addWidget(self._bulk_warmup_btn)
 
         lo.addStretch()
 
@@ -771,8 +890,20 @@ class MainWindow(QMainWindow):
         dlg.exec()
         self._refresh_table()
 
+    def _on_bulk_warmup(self) -> None:
+        """Show warmup template picker for currently selected accounts."""
+        if self._warmup_template_service is None:
+            return
+        ids = self._get_selected_account_ids_multi()
+        if not ids:
+            return
+        menu = QMenu(self)
+        self._populate_warmup_submenu(menu, ids)
+        menu.exec(self.cursor().pos())
+
     def _make_table(self) -> QTableWidget:
         t = QTableWidget(0, len(COLUMN_HEADERS))
+        t.setObjectName("accountsTable")
         t.setHorizontalHeaderLabels(COLUMN_HEADERS)
         t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -784,9 +915,13 @@ class MainWindow(QMainWindow):
         t.setWordWrap(False)
 
         hdr = t.horizontalHeader()
+        hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        hdr_font = hdr.font()
+        hdr_font.setPointSize(8)
+        hdr.setFont(hdr_font)
         for col in (COL_USERNAME, COL_DEVICE, COL_TAGS, COL_DISCOVERED, COL_LAST_SEEN):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
-        for col in (COL_STATUS, COL_FOLLOW, COL_UNFOLLOW, COL_LIMIT,
+        for col in (COL_TIMESLOT, COL_STATUS, COL_FOLLOW, COL_UNFOLLOW, COL_LIMIT,
                     COL_FOLLOW_TODAY, COL_LIKE_TODAY, COL_FOLLOW_LIM, COL_LIKE_LIM,
                     COL_REVIEW,
                     COL_DATA_DB, COL_SOURCES_TXT, COL_SRC_COUNT,
@@ -794,32 +929,62 @@ class MainWindow(QMainWindow):
                     COL_HOURS, COL_HEALTH, COL_TREND, COL_BLOCK, COL_GROUP, COL_ACTIONS):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
 
-        t.setColumnWidth(COL_USERNAME,     170)
-        t.setColumnWidth(COL_DEVICE,       120)
-        t.setColumnWidth(COL_STATUS,        72)
-        t.setColumnWidth(COL_TAGS,         110)
-        t.setColumnWidth(COL_FOLLOW,        46)
-        t.setColumnWidth(COL_UNFOLLOW,      52)
-        t.setColumnWidth(COL_LIMIT,         56)
-        t.setColumnWidth(COL_FOLLOW_TODAY,  84)
-        t.setColumnWidth(COL_LIKE_TODAY,    76)
-        t.setColumnWidth(COL_FOLLOW_LIM,    50)
-        t.setColumnWidth(COL_LIKE_LIM,      50)
-        t.setColumnWidth(COL_REVIEW,        48)
-        t.setColumnWidth(COL_DATA_DB,       48)
-        t.setColumnWidth(COL_SOURCES_TXT,   68)
-        t.setColumnWidth(COL_DISCOVERED,    96)
-        t.setColumnWidth(COL_LAST_SEEN,     96)
-        t.setColumnWidth(COL_SRC_COUNT,     76)
-        t.setColumnWidth(COL_FBR_QUALITY,   76)
-        t.setColumnWidth(COL_FBR_BEST,      76)
-        t.setColumnWidth(COL_FBR_DATE,      72)
-        t.setColumnWidth(COL_HOURS,         76)
-        t.setColumnWidth(COL_HEALTH,        52)
-        t.setColumnWidth(COL_TREND,         90)
-        t.setColumnWidth(COL_BLOCK,         48)
-        t.setColumnWidth(COL_GROUP,         90)
-        t.setColumnWidth(COL_ACTIONS,       80)
+        t.setColumnWidth(COL_TIMESLOT,      34)
+        t.setColumnWidth(COL_USERNAME,     150)
+        t.setColumnWidth(COL_DEVICE,       110)
+        t.setColumnWidth(COL_STATUS,        58)
+        t.setColumnWidth(COL_TAGS,         100)
+        t.setColumnWidth(COL_FOLLOW,        34)
+        t.setColumnWidth(COL_UNFOLLOW,      34)
+        t.setColumnWidth(COL_LIMIT,         44)
+        t.setColumnWidth(COL_FOLLOW_TODAY,  70)
+        t.setColumnWidth(COL_LIKE_TODAY,    70)
+        t.setColumnWidth(COL_FOLLOW_LIM,    42)
+        t.setColumnWidth(COL_LIKE_LIM,      42)
+        t.setColumnWidth(COL_REVIEW,        34)
+        t.setColumnWidth(COL_DATA_DB,       44)
+        t.setColumnWidth(COL_SOURCES_TXT,   72)
+        t.setColumnWidth(COL_DISCOVERED,    86)
+        t.setColumnWidth(COL_LAST_SEEN,     86)
+        t.setColumnWidth(COL_SRC_COUNT,     66)
+        t.setColumnWidth(COL_FBR_QUALITY,   66)
+        t.setColumnWidth(COL_FBR_BEST,      72)
+        t.setColumnWidth(COL_FBR_DATE,      66)
+        t.setColumnWidth(COL_HOURS,         50)
+        t.setColumnWidth(COL_HEALTH,        50)
+        t.setColumnWidth(COL_TREND,         50)
+        t.setColumnWidth(COL_BLOCK,         44)
+        t.setColumnWidth(COL_GROUP,         70)
+        t.setColumnWidth(COL_ACTIONS,       66)
+
+        # Tooltips on header items so operators see full names on hover
+        _HEADER_TOOLTIPS = {
+            COL_TIMESLOT: "Timeslot 1-4 (1=0-6h, 2=6-12h, 3=12-18h, 4=18-24h)",
+            COL_USERNAME: "Account username",
+            COL_DEVICE: "Device name (dot = status: green=running, gray=stop, red=offline)",
+            COL_HOURS: "Working hours (start - end)",
+            COL_STATUS: "Account status (Active / Removed)",
+            COL_TAGS: "Bot tags + operator tags",
+            COL_FOLLOW: "Follow enabled", COL_UNFOLLOW: "Unfollow enabled",
+            COL_LIMIT: "Limit per day", COL_FOLLOW_TODAY: "Follows today",
+            COL_LIKE_TODAY: "Likes today", COL_FOLLOW_LIM: "Follow limit/day",
+            COL_LIKE_LIM: "Like limit/day", COL_REVIEW: "Review flag",
+            COL_DATA_DB: "Data DB exists", COL_SOURCES_TXT: "Sources.txt exists",
+            COL_DISCOVERED: "Date account was discovered",
+            COL_LAST_SEEN: "Date account was last seen during sync",
+            COL_SRC_COUNT: "Active sources count",
+            COL_FBR_QUALITY: "Quality / Total sources",
+            COL_FBR_BEST: "Best FBR %", COL_FBR_DATE: "Last FBR analysis date",
+            COL_HEALTH: "Health score (0-100, green=70+, yellow=40-69, red=<40)",
+            COL_TREND: "Performance trend (14-day)",
+            COL_BLOCK: "Block/ban indicator",
+            COL_GROUP: "Account group name(s)",
+            COL_ACTIONS: "Quick actions menu",
+        }
+        for col_idx, tip in _HEADER_TOOLTIPS.items():
+            header_item = t.horizontalHeaderItem(col_idx)
+            if header_item:
+                header_item.setToolTip(tip)
 
         t.doubleClicked.connect(self._on_row_double_clicked)
         self._table = t
@@ -1226,8 +1391,12 @@ class MainWindow(QMainWindow):
             self._do_limits_increment(acc)
         elif action_type == "open_folder":
             self._open_account_folder(acc.device_id, acc.username)
+        elif action_type == "open_sources":
+            self._on_view_sources(acc.device_id, acc.username, acc.id)
         elif action_type == "copy_diagnostic":
             self._copy_diagnostic(acc)
+        elif action_type == "apply_warmup":
+            self._show_warmup_picker_for_account(acc.id)
         else:
             logger.warning("Unknown detail panel action: %s", action_type)
             return
@@ -1237,7 +1406,7 @@ class MainWindow(QMainWindow):
         # Note: _do_set_review etc. already call _refresh_table(), but we
         # still need to reload the drawer.  Guard against open_folder/copy
         # which don't mutate state.
-        if action_type not in ("open_folder", "copy_diagnostic"):
+        if action_type not in ("open_folder", "copy_diagnostic", "apply_warmup", "open_sources"):
             self._load_detail_for_account(account_id)
 
     def _copy_diagnostic(self, acc) -> None:
@@ -1342,6 +1511,7 @@ class MainWindow(QMainWindow):
         for w in (self._status_filter, self._fbr_filter, self._device_filter,
                   self._search_box, self._show_orphans_cb,
                   self._tags_filter, self._activity_filter, self._group_filter,
+                  self._timeslot_filter, self._health_filter,
                   self._review_cb):
             w.blockSignals(True)
 
@@ -1351,6 +1521,8 @@ class MainWindow(QMainWindow):
         self._tags_filter.setCurrentIndex(0)
         self._activity_filter.setCurrentIndex(0)
         self._group_filter.setCurrentIndex(0)
+        self._timeslot_filter.setCurrentIndex(0)
+        self._health_filter.setCurrentIndex(0)
         self._search_box.clear()
         self._show_orphans_cb.setChecked(False)
         self._review_cb.setChecked(False)
@@ -1358,10 +1530,30 @@ class MainWindow(QMainWindow):
         for w in (self._status_filter, self._fbr_filter, self._device_filter,
                   self._search_box, self._show_orphans_cb,
                   self._tags_filter, self._activity_filter, self._group_filter,
+                  self._timeslot_filter, self._health_filter,
                   self._review_cb):
             w.blockSignals(False)
 
         self._apply_filter()
+
+    @staticmethod
+    def _get_slot_number(acc: AccountRecord) -> int:
+        """Return timeslot 1-4 based on account start_time, or 0 if unknown."""
+        start_t = getattr(acc, "start_time", None) or ""
+        if not start_t:
+            return 0
+        try:
+            hour = int(start_t.split(":")[0])
+        except (ValueError, IndexError):
+            return 0
+        if hour < 6:
+            return 1
+        elif hour < 12:
+            return 2
+        elif hour < 18:
+            return 3
+        else:
+            return 4
 
     @staticmethod
     def _fbr_filter_matches(filt: str, snap: Optional[FBRSnapshotRecord]) -> bool:
@@ -1388,9 +1580,18 @@ class MainWindow(QMainWindow):
         tags_filt     = self._tags_filter.currentText()
         activity_filt = self._activity_filter.currentText()
         group_filt    = self._group_filter.currentText()
+        timeslot_filt = self._timeslot_filter.currentText()
+        health_filt   = self._health_filter.currentText()
         review_only   = self._review_cb.isChecked()
         query         = self._search_box.text().strip().lower()
         show_orphans  = self._show_orphans_cb.isChecked()
+
+        # Map timeslot filter to slot number for comparison
+        _slot_number_map = {
+            _TIMESLOT_FILTER_1: 1, _TIMESLOT_FILTER_2: 2,
+            _TIMESLOT_FILTER_3: 3, _TIMESLOT_FILTER_4: 4,
+        }
+        required_slot = _slot_number_map.get(timeslot_filt)
 
         active_accounts = [a for a in self._all_accounts if a.is_active]
         total_active    = len(active_accounts)
@@ -1408,6 +1609,29 @@ class MainWindow(QMainWindow):
             if device_filt != "All devices":
                 label = acc.device_name or acc.device_id
                 if label != device_filt:
+                    continue
+
+            # --- timeslot dimension ---
+            if required_slot is not None:
+                acc_slot = self._get_slot_number(acc)
+                if acc_slot != required_slot:
+                    continue
+
+            # --- health dimension ---
+            if health_filt != _HEALTH_FILTER_ALL and acc.id is not None:
+                snap_h = self._fbr_map.get(acc.id) if acc.id is not None else None
+                sess_h = self._session_map.get(acc.id) if acc.id is not None else None
+                src_h = self._source_count_map.get(acc.id, 0)
+                op_h = self._op_tags_map.get(acc.id) if acc.id else None
+                min_h = self._settings.get_min_source_count_warning()
+                score = AccountHealthService.compute_score(
+                    acc, snap_h, sess_h, src_h, op_h or "", min_h,
+                )
+                if health_filt == _HEALTH_FILTER_GREEN and score < 70:
+                    continue
+                if health_filt == _HEALTH_FILTER_YELLOW and (score < 40 or score >= 70):
+                    continue
+                if health_filt == _HEALTH_FILTER_RED and score >= 40:
                     continue
 
             # --- FBR dimension ---
@@ -1519,6 +1743,15 @@ class MainWindow(QMainWindow):
 
         disc_date = acc.discovered_at[:10] if acc.discovered_at else "—"
         seen_date = acc.last_seen_at[:10]  if acc.last_seen_at  else "—"
+
+        # Timeslot column (1-4)
+        slot_num = self._get_slot_number(acc)
+        slot_text = str(slot_num) if slot_num > 0 else "\u2014"
+        slot_item = _SortableItem(slot_text, slot_num)
+        slot_item.setTextAlignment(center)
+        if removed:
+            slot_item.setForeground(C_REMOVED())
+        self._table.setItem(row, COL_TIMESLOT, slot_item)
 
         self._table.setItem(row, COL_USERNAME,    self._make_item(acc.username, dimmed=removed))
 
@@ -1705,6 +1938,7 @@ class MainWindow(QMainWindow):
     def _fill_orphan_row(self, row: int, disc: DiscoveredAccount) -> None:
         center = Qt.AlignmentFlag.AlignCenter
 
+        self._table.setItem(row, COL_TIMESLOT,    self._make_item("\u2014", center))
         self._table.setItem(row, COL_USERNAME,    self._make_item(disc.username))
         self._table.setItem(row, COL_DEVICE,      self._make_item(disc.device_name))
         self._table.setItem(row, COL_STATUS,      self._make_item("Orphan", center, C_ORPHAN()))
@@ -1877,7 +2111,11 @@ class MainWindow(QMainWindow):
         path = self._root_input.text().strip()
         if not path:
             return
-        self._settings.set_bot_root(path)
+        try:
+            self._settings.set_bot_root(path)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Bot Root", str(exc))
+            return
         self._sources_tab.set_bot_root(path)
         self._set_status(f"Bot root saved: {path}")
 
@@ -1938,6 +2176,29 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+        # Detect auto-fix proposals (no execution — operator reviews first)
+        auto_fix_msg = ""
+        if self._auto_fix_service:
+            bot_root = self._settings.get_bot_root() or ""
+            if bot_root:
+                try:
+                    proposals = self._auto_fix_service.detect_all(bot_root)
+                    if proposals:
+                        from oh.ui.auto_fix_dialog import AutoFixProposalDialog
+                        dlg = AutoFixProposalDialog(
+                            proposals, self._auto_fix_service, parent=self
+                        )
+                        dlg.exec()
+                        fix_result = dlg.result
+                        self._last_auto_fix_result = fix_result
+                        if fix_result.has_actions:
+                            self._refresh_table()
+                            lines = fix_result.summary_lines()
+                            auto_fix_msg = "  |  Auto-fix: " + "; ".join(lines)
+                            logger.info("Auto-fix applied: %s", "; ".join(lines))
+                except Exception as exc:
+                    logger.warning("Auto-fix detection failed: %s", exc)
+
         parts = [
             f"Sync complete: {active} accounts",
             f"+{sync_run.accounts_added}" if sync_run.accounts_added else None,
@@ -1949,25 +2210,24 @@ class MainWindow(QMainWindow):
             msg += f"  \u2014  {n_crit} CRITICAL \u2014 Open Cockpit to review"
         else:
             msg += "  \u2014  Ready"
+        msg += auto_fix_msg
         self._set_status(msg)
 
     # ------------------------------------------------------------------
     # Update check
     # ------------------------------------------------------------------
 
+    # TODO: Make onimator-rgb/oh-releases repo private once authenticated
+    # download is set up (e.g. via a server API). Currently raw.githubusercontent
+    # URLs require no auth for public repos; making it private would break both
+    # START.bat and in-app update checks without a token/proxy.
+    _UPDATE_URL = "https://raw.githubusercontent.com/onimator-rgb/oh-releases/main/update.json"
+
     def _check_for_updates(self) -> None:
-        """Check for updates on startup (non-blocking)."""
-        enabled = self._settings.get("update_check_enabled")
-        if enabled != "1":
-            return
-
-        url = self._settings.get("update_check_url") or ""
-        if not url:
-            return
-
+        """Check for updates on startup (always runs)."""
         try:
             from oh.services.update_service import UpdateService
-            svc = UpdateService(url)
+            svc = UpdateService(self._UPDATE_URL)
             info = svc.check_for_update()
 
             if info is None:
@@ -1988,6 +2248,72 @@ class MainWindow(QMainWindow):
 
         except Exception as exc:
             logger.debug("Update check failed: %s", exc)
+
+    def _on_check_for_updates_manual(self) -> None:
+        """Manual 'Check for Updates' triggered from the brand bar button."""
+        try:
+            from oh.services.update_service import UpdateService
+            svc = UpdateService(self._UPDATE_URL)
+            info = svc.check_for_update()
+
+            if info:
+                from oh.ui.update_dialog import UpdateDialog
+                dlg = UpdateDialog(self, svc, info)
+                result = dlg.exec()
+                if result == 2:  # skip
+                    self._settings.set("update_skipped_version", info.version)
+            else:
+                QMessageBox.information(
+                    self, "No Update",
+                    f"You are running the latest version ({svc.current_version}).",
+                )
+        except Exception as exc:
+            logger.warning("Manual update check failed: %s", exc)
+            QMessageBox.warning(
+                self, "Update Check Failed",
+                f"Could not check for updates:\n{exc}",
+            )
+
+    # ------------------------------------------------------------------
+    # Startup dialogs (onboarding + what's new)
+    # ------------------------------------------------------------------
+
+    def _show_startup_dialogs(self) -> None:
+        """Show onboarding wizard and/or what's new dialog on startup."""
+        # 1. Onboarding wizard for first-time users
+        bot_root = self._settings.get_bot_root()
+        onboarding_done = self._settings.get("onboarding_done") or "0"
+        if not bot_root and onboarding_done != "1":
+            from oh.ui.onboarding_dialog import OnboardingDialog
+            dlg = OnboardingDialog(self._settings, self._scan_service, parent=self)
+            dlg.tour_requested.connect(self._start_guided_tour)
+            dlg.cockpit_requested.connect(self._on_cockpit)
+            dlg.exec()
+            # Refresh the path input in case user set it during onboarding
+            saved = self._settings.get_bot_root()
+            if saved:
+                self._root_input.setText(saved)
+
+        # 2. What's New dialog after version updates
+        self._check_whats_new()
+
+    def _check_whats_new(self) -> None:
+        """Show What's New dialog if the version changed since last seen."""
+        try:
+            from oh.version import BUILD_VERSION
+        except ImportError:
+            return
+        last_seen = self._settings.get("last_seen_version") or ""
+        if last_seen == BUILD_VERSION:
+            return
+        from oh.ui.whats_new_dialog import WhatsNewDialog, WHATS_NEW
+        if BUILD_VERSION not in WHATS_NEW:
+            # No changelog for this version — just update the marker
+            self._settings.set("last_seen_version", BUILD_VERSION)
+            return
+        dlg = WhatsNewDialog(BUILD_VERSION, parent=self)
+        dlg.exec()
+        self._settings.set("last_seen_version", BUILD_VERSION)
 
     # ------------------------------------------------------------------
     # Auto-scan scheduler
@@ -2227,10 +2553,20 @@ class MainWindow(QMainWindow):
 
         on_cleanup = _handle_account_cleanup if account_id is not None else None
 
+        # Fetch source date-added data
+        source_dates = {}
+        if account_id is not None:
+            try:
+                sa_repo = SourceAssignmentRepository(self._conn)
+                source_dates = sa_repo.get_source_dates_for_account(account_id)
+            except Exception:
+                logger.debug("Could not load source dates", exc_info=True)
+
         self._set_status("Ready.")
         dlg = SourceDialog(
             inspection, fbr_result, usage_result,
-            on_delete=on_delete, on_cleanup=on_cleanup, parent=self,
+            on_delete=on_delete, on_cleanup=on_cleanup,
+            source_dates=source_dates, parent=self,
         )
         dlg.exec()
 
@@ -2247,6 +2583,12 @@ class MainWindow(QMainWindow):
         if data is None:
             return
         accounts, recs, review, deletions, actions = data
+
+        # Get auto-fix summary lines if available
+        auto_fix_lines = []
+        if hasattr(self, '_last_auto_fix_result') and self._last_auto_fix_result:
+            auto_fix_lines = self._last_auto_fix_result.summary_lines()
+
         dlg = CockpitDialog(
             accounts=accounts,
             recommendations=recs,
@@ -2261,6 +2603,7 @@ class MainWindow(QMainWindow):
             on_open_delete_history=self._open_delete_history,
             on_open_action_history=self._on_action_history,
             on_refresh=self._gather_cockpit_data,
+            auto_fix_lines=auto_fix_lines,
             parent=self,
         )
         dlg.exec()
@@ -2457,6 +2800,18 @@ class MainWindow(QMainWindow):
             menu.addAction("TB +1", lambda: self._do_tb_increment(acc))
             menu.addAction("Limits +1", lambda: self._do_limits_increment(acc))
 
+        if self._settings_copier_service is not None:
+            menu.addSeparator()
+            menu.addAction(
+                "Copy Settings From This Account",
+                lambda: self._open_settings_copier(pre_source_id=acc.id),
+            )
+
+        if self._warmup_template_service is not None:
+            menu.addSeparator()
+            warmup_sub = menu.addMenu("Apply Warmup")
+            self._populate_warmup_submenu(warmup_sub, [acc.id])
+
         menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     def _show_orphan_action_menu(self, disc: DiscoveredAccount, btn: QPushButton) -> None:
@@ -2526,6 +2881,71 @@ class MainWindow(QMainWindow):
             self._set_status(f"{acc.username}: \u2192 {result}")
         self._refresh_table()
 
+    def _open_settings_copier(
+        self,
+        pre_source_id: Optional[int] = None,
+        pre_target_ids: Optional[list] = None,
+    ) -> None:
+        """Open the Settings Copier wizard dialog."""
+        if self._settings_copier_service is None:
+            return
+        from oh.ui.settings_copier_dialog import SettingsCopierDialog
+        dlg = SettingsCopierDialog(
+            service=self._settings_copier_service,
+            accounts=self._all_accounts,
+            pre_selected_source_id=pre_source_id,
+            pre_selected_target_ids=pre_target_ids,
+            parent=self,
+        )
+        dlg.exec()
+        self._refresh_table()
+
+    def _populate_warmup_submenu(self, submenu, account_ids: list) -> None:
+        """Fill a QMenu with warmup template choices."""
+        templates = self._warmup_template_service.get_all_templates()
+        if not templates:
+            action = submenu.addAction("(no templates — configure in Settings)")
+            action.setEnabled(False)
+            return
+        for tpl in templates:
+            label = (
+                f"{tpl.name}  (F:{tpl.follow_start} +{tpl.follow_increment}\u2192{tpl.follow_cap}, "
+                f"L:{tpl.like_start} +{tpl.like_increment}\u2192{tpl.like_cap})"
+            )
+            # Factory to capture tpl.name in loop
+            def _make_cb(name=tpl.name, ids=account_ids):
+                return lambda: self._open_warmup_deploy(
+                    pre_selected_ids=ids, pre_selected_template_name=name,
+                )
+            submenu.addAction(label, _make_cb())
+
+    def _show_warmup_picker_for_account(self, account_id: int) -> None:
+        """Show a popup menu to pick a warmup template for one account (from detail panel)."""
+        if self._warmup_template_service is None:
+            return
+        menu = QMenu(self)
+        self._populate_warmup_submenu(menu, [account_id])
+        menu.exec(self.cursor().pos())
+
+    def _open_warmup_deploy(
+        self,
+        pre_selected_ids: Optional[list] = None,
+        pre_selected_template_name: Optional[str] = None,
+    ) -> None:
+        """Open the Warmup Deploy wizard dialog."""
+        if self._warmup_template_service is None:
+            return
+        from oh.ui.warmup_deploy_dialog import WarmupDeployDialog
+        dlg = WarmupDeployDialog(
+            service=self._warmup_template_service,
+            accounts=self._all_accounts,
+            pre_selected_account_ids=pre_selected_ids,
+            pre_selected_template_name=pre_selected_template_name,
+            parent=self,
+        )
+        dlg.exec()
+        self._refresh_table()
+
     def _on_find_sources(self, acc: AccountRecord) -> None:
         """Open the Source Finder dialog for an account."""
         bot_root = self._get_validated_root()
@@ -2576,7 +2996,7 @@ class MainWindow(QMainWindow):
                 f"Folder does not exist on disk:\n{folder}"
             )
             return
-        subprocess.Popen(f'explorer "{folder}"', shell=True)
+        os.startfile(str(folder))
         self._set_status(f"Opened: {folder}")
 
     def _on_row_double_clicked(self, index) -> None:
@@ -2602,12 +3022,9 @@ class MainWindow(QMainWindow):
                 dlg.exec()
             return
 
-        if kind == "account":
-            acc = self._accounts.get_by_id(payload)
-            if acc and acc.is_active:
-                self._open_account_folder(acc.device_id, acc.username)
-        elif kind == "orphan":
-            self._open_account_folder(payload.device_id, payload.username)
+        # Double-click on any other column → open detail panel
+        if kind in ("account", "orphan"):
+            self._on_account_selected(index)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -2737,6 +3154,14 @@ class MainWindow(QMainWindow):
                 self, "Report Failed",
                 f"Could not create report:\n\n{exc}",
             )
+
+    def _start_guided_tour(self) -> None:
+        """Launch the interactive guided tour overlay."""
+        from oh.ui.guided_tour import GuidedTourOverlay
+        overlay = GuidedTourOverlay(self._settings, parent=self)
+        overlay.tour_finished.connect(overlay.deleteLater)
+        overlay.show()
+        overlay.raise_()
 
     def _set_status(self, message: str) -> None:
         self._statusbar.showMessage(message)

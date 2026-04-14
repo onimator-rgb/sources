@@ -18,6 +18,7 @@ Update flow:
 5. Generate updater.bat that swaps files after OH closes
 6. Launch updater.bat and exit OH
 """
+import hashlib
 import json
 import logging
 import os
@@ -37,6 +38,7 @@ class UpdateInfo:
     changelog: str
     release_date: str
     min_version: str = ""
+    sha256: str = ""
 
     @property
     def is_valid(self) -> bool:
@@ -95,6 +97,7 @@ class UpdateService:
             changelog=data.get("changelog", ""),
             release_date=data.get("release_date", ""),
             min_version=data.get("min_version", ""),
+            sha256=data.get("sha256", ""),
         )
 
         if not info.is_valid:
@@ -117,24 +120,24 @@ class UpdateService:
         self,
         download_url: str,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        expected_sha256: str = "",
     ) -> Optional[str]:
         """Download the update .exe to a temp location.
 
         Args:
             download_url: URL to download from
             progress_callback: optional (downloaded_bytes, total_bytes) callback
+            expected_sha256: if provided, verify downloaded file hash
 
         Returns path to downloaded file, or None on failure.
         """
+        exe_dir = self._get_exe_dir()
+        temp_path = os.path.join(exe_dir, "OH_update.exe")
         try:
             resp = requests.get(download_url, stream=True, timeout=300)
             resp.raise_for_status()
 
             total = int(resp.headers.get("content-length", 0))
-
-            # Save to temp file next to current exe
-            exe_dir = self._get_exe_dir()
-            temp_path = os.path.join(exe_dir, "OH_update.exe")
 
             downloaded = 0
             with open(temp_path, "wb") as f:
@@ -144,14 +147,33 @@ class UpdateService:
                     if progress_callback and total > 0:
                         progress_callback(downloaded, total)
 
+            # Verify SHA256 hash if provided
+            if expected_sha256:
+                h = hashlib.sha256()
+                with open(temp_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(65536), b""):
+                        h.update(chunk)
+                computed = h.hexdigest()
+                if computed != expected_sha256:
+                    os.remove(temp_path)
+                    logger.error(
+                        "Update hash mismatch: expected %s, got %s",
+                        expected_sha256, computed,
+                    )
+                    return None
+
             logger.info("Update downloaded to: %s (%d bytes)", temp_path, downloaded)
             return temp_path
 
         except requests.RequestException as exc:
             logger.error("Download failed: %s", exc)
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
             return None
         except OSError as exc:
             logger.error("Failed to save update: %s", exc)
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
             return None
 
     def apply_update(self, update_path: str) -> bool:
@@ -169,6 +191,13 @@ class UpdateService:
         exe_dir = self._get_exe_dir()
         current_exe = os.path.join(exe_dir, "OH.exe")
         updater_path = os.path.join(exe_dir, "oh_updater.bat")
+
+        # Validate paths don't contain batch-special characters
+        _BAD_CHARS = set('&|><^%"')
+        for path_str in (update_path, current_exe):
+            if _BAD_CHARS.intersection(path_str):
+                logger.error("Unsafe characters in update path: %s", path_str)
+                return False
 
         bat_content = f'''@echo off
 echo OH Updater - Please wait...

@@ -298,6 +298,18 @@ class AccountDetailPanel(QWidget):
         export_btn.setToolTip("Export account profile to text file")
         export_btn.clicked.connect(self._on_export_profile)
 
+        warmup_btn = QPushButton("Apply Warmup")
+        warmup_btn.setFixedHeight(28)
+        warmup_btn.setStyleSheet(btn_style)
+        warmup_btn.setToolTip("Apply a warmup template to this account")
+        warmup_btn.clicked.connect(self._on_warmup_clicked)
+
+        sources_btn = QPushButton("Open Sources")
+        sources_btn.setFixedHeight(28)
+        sources_btn.setStyleSheet(btn_style)
+        sources_btn.setToolTip("Open full Sources & FBR dialog for this account")
+        sources_btn.clicked.connect(self._on_open_sources_clicked)
+
         # Row 1: operational actions
         lo.addWidget(self._set_review_btn, 0, 0)
         lo.addWidget(tb_btn, 0, 1)
@@ -305,8 +317,12 @@ class AccountDetailPanel(QWidget):
 
         # Row 2: utility actions
         lo.addWidget(open_btn, 1, 0)
-        lo.addWidget(self._copy_btn, 1, 1)
-        lo.addWidget(export_btn, 1, 2)
+        lo.addWidget(sources_btn, 1, 1)
+        lo.addWidget(self._copy_btn, 1, 2)
+
+        # Row 3: export + templates
+        lo.addWidget(export_btn, 2, 0)
+        lo.addWidget(warmup_btn, 2, 1, 1, 2)
 
         return w
 
@@ -417,6 +433,16 @@ class AccountDetailPanel(QWidget):
         if self._current_account_id is None:
             return
         self.action_requested.emit("open_folder", self._current_account_id)
+
+    def _on_open_sources_clicked(self) -> None:
+        if self._current_account_id is None:
+            return
+        self.action_requested.emit("open_sources", self._current_account_id)
+
+    def _on_warmup_clicked(self) -> None:
+        if self._current_account_id is None:
+            return
+        self.action_requested.emit("apply_warmup", self._current_account_id)
 
     def _on_copy_diagnostic_clicked(self) -> None:
         if self._current_account_id is None:

@@ -586,6 +586,71 @@ CREATE INDEX IF NOT EXISTS idx_group_members_account
 """
 
 # ---------------------------------------------------------------------------
+# Migration 014 — auto-fix actions log
+# ---------------------------------------------------------------------------
+
+_MIGRATION_014_SQL = """
+CREATE TABLE IF NOT EXISTS auto_fix_actions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    fix_type        TEXT    NOT NULL,
+    target_username TEXT,
+    target_device   TEXT,
+    details         TEXT,
+    items_affected  INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auto_fix_created
+    ON auto_fix_actions(created_at DESC)
+"""
+
+# ---------------------------------------------------------------------------
+# Migration 015 — warmup templates
+# ---------------------------------------------------------------------------
+
+_MIGRATION_015_SQL = """
+CREATE TABLE IF NOT EXISTS warmup_templates (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                TEXT    NOT NULL UNIQUE,
+    description         TEXT,
+    follow_start        INTEGER NOT NULL DEFAULT 10,
+    follow_increment    INTEGER NOT NULL DEFAULT 5,
+    follow_cap          INTEGER NOT NULL DEFAULT 50,
+    like_start          INTEGER NOT NULL DEFAULT 20,
+    like_increment      INTEGER NOT NULL DEFAULT 5,
+    like_cap            INTEGER NOT NULL DEFAULT 80,
+    auto_increment      INTEGER NOT NULL DEFAULT 1,
+    enable_follow       INTEGER NOT NULL DEFAULT 1,
+    enable_like         INTEGER NOT NULL DEFAULT 1,
+    is_default          INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT    NOT NULL,
+    updated_at          TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_warmup_templates_name
+    ON warmup_templates(name);
+
+INSERT INTO warmup_templates (name, description, follow_start, follow_increment, follow_cap,
+    like_start, like_increment, like_cap, auto_increment, enable_follow, enable_like,
+    is_default, created_at, updated_at)
+VALUES
+    ('Conservative', 'New or personal accounts — gentle ramp-up', 5, 5, 40, 10, 5, 60, 1, 1, 1, 1, datetime('now'), datetime('now')),
+    ('Moderate', 'Established accounts — balanced growth', 15, 10, 70, 30, 10, 100, 1, 1, 1, 1, datetime('now'), datetime('now')),
+    ('Aggressive', 'Mature accounts with high followers — fast scaling', 40, 15, 150, 60, 20, 200, 1, 1, 1, 1, datetime('now'), datetime('now'))
+"""
+
+# ---------------------------------------------------------------------------
+# Migration 016 — add created_at to source_assignments for tracking when
+# a source was first added to an account
+# ---------------------------------------------------------------------------
+
+_MIGRATION_016_SQL = """
+ALTER TABLE source_assignments ADD COLUMN created_at TEXT;
+
+UPDATE source_assignments SET created_at = updated_at WHERE created_at IS NULL;
+"""
+
+# ---------------------------------------------------------------------------
 # Registry — append new entries here, never modify existing ones
 # ---------------------------------------------------------------------------
 
@@ -603,6 +668,9 @@ _MIGRATIONS: List[Tuple[int, str, str]] = [
     (11, "blacklist_and_notes", _MIGRATION_011_SQL),
     (12, "campaign_templates",  _MIGRATION_012_SQL),
     (13, "error_reports_blocks_groups", _MIGRATION_013_SQL),
+    (14, "auto_fix_actions",            _MIGRATION_014_SQL),
+    (15, "warmup_templates",             _MIGRATION_015_SQL),
+    (16, "source_created_at",            _MIGRATION_016_SQL),
 ]
 
 

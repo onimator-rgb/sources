@@ -27,6 +27,7 @@ from oh.services.source_delete_service import SourceDeleteService
 from oh.services.source_trend_service import SourceTrendService
 from oh.ui.delete_confirm_dialog import DeleteConfirmDialog
 from oh.ui.delete_history_dialog import DeleteHistoryDialog
+from oh.ui.target_splitter_dialog import TargetSplitterDialog
 from oh.ui.style import sc, BTN_HEIGHT_MD
 from oh.ui.workers import WorkerThread
 
@@ -123,6 +124,8 @@ class SourcesTab(QWidget):
         bulk_discovery_service=None,
         settings_repo=None,
         conn=None,
+        target_splitter_service=None,
+        account_group_repo=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -130,6 +133,8 @@ class SourcesTab(QWidget):
         self._delete_svc    = source_delete_service
         self._bulk_discovery_svc = bulk_discovery_service
         self._settings_repo = settings_repo
+        self._target_splitter_svc = target_splitter_service
+        self._account_group_repo = account_group_repo
         self._trend_service: Optional[SourceTrendService] = (
             SourceTrendService(conn) if conn is not None else None
         )
@@ -210,6 +215,19 @@ class SourcesTab(QWidget):
         )
         self._bulk_delete_btn.clicked.connect(self._on_bulk_delete)
         lo.addWidget(self._bulk_delete_btn)
+
+        self._distribute_btn = QPushButton("Distribute Sources")
+        self._distribute_btn.setFixedHeight(BTN_HEIGHT_MD)
+        self._distribute_btn.setToolTip(
+            "Distribute a set of source names across multiple accounts.\n"
+            "Supports even split and fill-up strategies with full preview."
+        )
+        self._distribute_btn.setStyleSheet(
+            f"QPushButton {{ color: {sc('link').name()}; }}"
+            f"QPushButton:hover {{ background: #1a2a3a; }}"
+        )
+        self._distribute_btn.clicked.connect(self._on_distribute_sources)
+        lo.addWidget(self._distribute_btn)
 
         self._history_btn = QPushButton("History")
         self._history_btn.setFixedHeight(BTN_HEIGHT_MD)
@@ -827,6 +845,44 @@ class SourcesTab(QWidget):
         self._worker.error.connect(self._on_delete_error)
         self._worker.finished.connect(lambda: self._set_busy(False))
         self._worker.start()
+
+    def _on_distribute_sources(self) -> None:
+        """Open the Target Splitter wizard dialog."""
+        if not self._bot_root:
+            self._set_status(
+                "Bot root not set — configure the Onimator path first."
+            )
+            return
+
+        if self._target_splitter_svc is None:
+            self._set_status("Distribute Sources is not available.")
+            return
+
+        # Pre-fill with selected source if any
+        pre_selected: list = []
+        selected = self._sources_table.selectedItems()
+        if selected:
+            seen: set = set()
+            for item in selected:
+                row = item.row()
+                name_item = self._sources_table.item(row, _COL_SOURCE)
+                if name_item:
+                    name = name_item.data(Qt.ItemDataRole.UserRole)
+                    if name and name not in seen:
+                        pre_selected.append(name)
+                        seen.add(name)
+
+        dlg = TargetSplitterDialog(
+            parent=self,
+            service=self._target_splitter_svc,
+            bot_root=self._bot_root,
+            pre_selected_sources=pre_selected if pre_selected else None,
+            account_group_repo=self._account_group_repo,
+        )
+        result = dlg.exec()
+        if result == TargetSplitterDialog.DialogCode.Accepted:
+            self.load_data()
+            self._request_accounts_refresh()
 
     def _on_show_history(self) -> None:
         if self._history_dialog is None or not self._history_dialog.isVisible():
