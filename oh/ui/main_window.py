@@ -747,6 +747,13 @@ class MainWindow(QMainWindow):
         clear_btn.clicked.connect(self._clear_filters)
         lo.addWidget(clear_btn)
 
+        # Column visibility chooser
+        cols_btn = QPushButton("Columns \u25BE")
+        cols_btn.setFixedHeight(28)
+        cols_btn.setToolTip("Show/hide table columns")
+        cols_btn.clicked.connect(lambda: self._show_column_chooser(cols_btn))
+        lo.addWidget(cols_btn)
+
         lo.addStretch()
 
         self._count_label = QLabel("")
@@ -901,6 +908,37 @@ class MainWindow(QMainWindow):
         self._populate_warmup_submenu(menu, ids)
         menu.exec(self.cursor().pos())
 
+    # Default column widths — wide enough so headers are never truncated
+    _DEFAULT_COL_WIDTHS = {
+        COL_TIMESLOT:    36,
+        COL_USERNAME:   160,
+        COL_DEVICE:     120,
+        COL_HOURS:       60,
+        COL_STATUS:      60,
+        COL_TAGS:       120,
+        COL_FOLLOW:      38,
+        COL_UNFOLLOW:    38,
+        COL_LIMIT:       50,
+        COL_FOLLOW_TODAY: 78,
+        COL_LIKE_TODAY:   78,
+        COL_FOLLOW_LIM:  46,
+        COL_LIKE_LIM:    46,
+        COL_REVIEW:      38,
+        COL_DATA_DB:     52,
+        COL_SOURCES_TXT: 80,
+        COL_DISCOVERED:  90,
+        COL_LAST_SEEN:   90,
+        COL_SRC_COUNT:   76,
+        COL_FBR_QUALITY: 72,
+        COL_FBR_BEST:    80,
+        COL_FBR_DATE:    76,
+        COL_HEALTH:      56,
+        COL_TREND:       52,
+        COL_BLOCK:       48,
+        COL_GROUP:       80,
+        COL_ACTIONS:     74,
+    }
+
     def _make_table(self) -> QTableWidget:
         t = QTableWidget(0, len(COLUMN_HEADERS))
         t.setObjectName("accountsTable")
@@ -914,48 +952,26 @@ class MainWindow(QMainWindow):
         t.setSortingEnabled(True)
         t.setWordWrap(False)
 
+        # Enable horizontal scrollbar so columns don't squeeze into the viewport
+        t.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+
         hdr = t.horizontalHeader()
         hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        hdr.setStretchLastSection(False)   # do NOT stretch — allow h-scroll instead
         hdr_font = hdr.font()
         hdr_font.setPointSize(8)
         hdr.setFont(hdr_font)
-        for col in (COL_USERNAME, COL_DEVICE, COL_TAGS, COL_DISCOVERED, COL_LAST_SEEN):
-            hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
-        for col in (COL_TIMESLOT, COL_STATUS, COL_FOLLOW, COL_UNFOLLOW, COL_LIMIT,
-                    COL_FOLLOW_TODAY, COL_LIKE_TODAY, COL_FOLLOW_LIM, COL_LIKE_LIM,
-                    COL_REVIEW,
-                    COL_DATA_DB, COL_SOURCES_TXT, COL_SRC_COUNT,
-                    COL_FBR_QUALITY, COL_FBR_BEST, COL_FBR_DATE,
-                    COL_HOURS, COL_HEALTH, COL_TREND, COL_BLOCK, COL_GROUP, COL_ACTIONS):
-            hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
 
-        t.setColumnWidth(COL_TIMESLOT,      34)
-        t.setColumnWidth(COL_USERNAME,     150)
-        t.setColumnWidth(COL_DEVICE,       110)
-        t.setColumnWidth(COL_STATUS,        58)
-        t.setColumnWidth(COL_TAGS,         100)
-        t.setColumnWidth(COL_FOLLOW,        34)
-        t.setColumnWidth(COL_UNFOLLOW,      34)
-        t.setColumnWidth(COL_LIMIT,         44)
-        t.setColumnWidth(COL_FOLLOW_TODAY,  70)
-        t.setColumnWidth(COL_LIKE_TODAY,    70)
-        t.setColumnWidth(COL_FOLLOW_LIM,    42)
-        t.setColumnWidth(COL_LIKE_LIM,      42)
-        t.setColumnWidth(COL_REVIEW,        34)
-        t.setColumnWidth(COL_DATA_DB,       44)
-        t.setColumnWidth(COL_SOURCES_TXT,   72)
-        t.setColumnWidth(COL_DISCOVERED,    86)
-        t.setColumnWidth(COL_LAST_SEEN,     86)
-        t.setColumnWidth(COL_SRC_COUNT,     66)
-        t.setColumnWidth(COL_FBR_QUALITY,   66)
-        t.setColumnWidth(COL_FBR_BEST,      72)
-        t.setColumnWidth(COL_FBR_DATE,      66)
-        t.setColumnWidth(COL_HOURS,         50)
-        t.setColumnWidth(COL_HEALTH,        50)
-        t.setColumnWidth(COL_TREND,         50)
-        t.setColumnWidth(COL_BLOCK,         44)
-        t.setColumnWidth(COL_GROUP,         70)
-        t.setColumnWidth(COL_ACTIONS,       66)
+        # All columns are Interactive (user can resize by dragging) —
+        # none are Stretch so the table can scroll horizontally.
+        for col in range(len(COLUMN_HEADERS)):
+            hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+
+        for col, w in self._DEFAULT_COL_WIDTHS.items():
+            t.setColumnWidth(col, w)
+
+        # Restore hidden columns from settings
+        self._apply_column_visibility(t)
 
         # Tooltips on header items so operators see full names on hover
         _HEADER_TOOLTIPS = {
@@ -1535,6 +1551,86 @@ class MainWindow(QMainWindow):
             w.blockSignals(False)
 
         self._apply_filter()
+
+    # ------------------------------------------------------------------
+    # Column visibility
+    # ------------------------------------------------------------------
+
+    # Columns that cannot be hidden (always visible)
+    _ALWAYS_VISIBLE = {COL_USERNAME, COL_ACTIONS}
+
+    # Human-readable labels for the column chooser menu
+    _COL_LABELS = {
+        COL_TIMESLOT: "Timeslot", COL_USERNAME: "Username",
+        COL_DEVICE: "Device", COL_HOURS: "Hours",
+        COL_STATUS: "Status", COL_TAGS: "Tags",
+        COL_FOLLOW: "Follow", COL_UNFOLLOW: "Unfollow",
+        COL_LIMIT: "Limit/Day",
+        COL_FOLLOW_TODAY: "Follow Today", COL_LIKE_TODAY: "Like Today",
+        COL_FOLLOW_LIM: "Follow Limit", COL_LIKE_LIM: "Like Limit",
+        COL_REVIEW: "Review",
+        COL_DATA_DB: "Data DB", COL_SOURCES_TXT: "Sources.txt",
+        COL_DISCOVERED: "Discovered", COL_LAST_SEEN: "Last Seen",
+        COL_SRC_COUNT: "Active Sources",
+        COL_FBR_QUALITY: "Quality/Total", COL_FBR_BEST: "Best FBR%",
+        COL_FBR_DATE: "Last FBR",
+        COL_HEALTH: "Health", COL_TREND: "Trend",
+        COL_BLOCK: "Block", COL_GROUP: "Group",
+        COL_ACTIONS: "Actions",
+    }
+
+    def _show_column_chooser(self, btn: QPushButton) -> None:
+        """Show a popup menu with checkable column names."""
+        menu = QMenu(self)
+        actions = []
+        for col in range(len(COLUMN_HEADERS)):
+            label = self._COL_LABELS.get(col, COLUMN_HEADERS[col])
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(not self._table.isColumnHidden(col))
+            if col in self._ALWAYS_VISIBLE:
+                action.setEnabled(False)
+            actions.append((col, action))
+
+        menu.addSeparator()
+        show_all = menu.addAction("Show All Columns")
+
+        chosen = menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+        if chosen == show_all:
+            for col in range(len(COLUMN_HEADERS)):
+                self._table.setColumnHidden(col, False)
+            self._save_column_visibility()
+            return
+
+        # Apply toggles
+        for col, act in actions:
+            self._table.setColumnHidden(col, not act.isChecked())
+        self._save_column_visibility()
+
+    def _save_column_visibility(self) -> None:
+        """Persist hidden column indices to settings."""
+        hidden = []
+        for col in range(len(COLUMN_HEADERS)):
+            if self._table.isColumnHidden(col) and col not in self._ALWAYS_VISIBLE:
+                hidden.append(str(col))
+        self._settings.set("hidden_columns", ",".join(hidden))
+
+    def _apply_column_visibility(self, t: QTableWidget) -> None:
+        """Restore hidden columns from settings."""
+        raw = self._settings.get("hidden_columns") or ""
+        if not raw:
+            return
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                col = int(part)
+                if 0 <= col < len(COLUMN_HEADERS) and col not in self._ALWAYS_VISIBLE:
+                    t.setColumnHidden(col, True)
+            except ValueError:
+                pass
 
     @staticmethod
     def _get_slot_number(acc: AccountRecord) -> int:
