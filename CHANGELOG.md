@@ -2,6 +2,32 @@
 
 All notable changes to OH are documented here.
 
+## 1.8.0 — 2026-04-15
+
+### Notifications Browser
+- **Notifications tab** — new main tab reading bot's `notificationdatabase.db`
+  - Color-coded notification types: Block (orange), Suspended (warning), Error (pink), Login (blue), Added (green), Deleted (red)
+  - Filter by device, notification type, account, date range
+  - Right-click context menu: filter by account/device/type
+  - CSV export, sortable columns
+
+### Like Sources & LBR Analytics
+- **Like Sources sub-tab** — Sources tab now has "Follow Sources" and "Like Sources" sub-tabs
+  - Like-Back Rate (LBR) analytics mirroring FBR: per-source like count, followback count, LBR%
+  - Global like source aggregation: active/historical accounts, avg LBR, weighted LBR, quality flag
+  - Detail pane with per-account breakdown for selected like source
+- **Analyze LBR button** on Accounts toolbar — batch LBR analysis across all active accounts
+- **Account detail drawer** — Sources tab now shows both Follow Sources and Like Sources sections
+- DB migration 017: `lbr_snapshots`, `lbr_source_results`, `like_source_assignments` tables
+
+### Enhanced Settings Copier
+- **215 settings** across 9 collapsible categories (up from 17 flat settings):
+  Follow, Unfollow, Like, Story, Reels, DM, Share, Post, Human Behavior
+- **Text file copying**: name_must_include.txt, name_must_not_include.txt, like name filters
+- **Collapsible category sections** with select all/none per category
+- **Category-level audit trail** in operator actions
+- Non-blocking settings loading via WorkerThread
+
 ## 2026-03-30
 
 ### Stage 5 — Daily Operations Cockpit

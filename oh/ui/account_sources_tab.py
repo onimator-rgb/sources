@@ -1,7 +1,8 @@
 """
 AccountSourcesTab -- embedded sources table in the account detail drawer.
 
-Shows active + historical sources for one account with FBR metrics.
+Shows active + historical Follow sources (FBR) and Like sources (LBR)
+for one account, each in its own section.
 """
 import logging
 from typing import Optional, List
@@ -12,25 +13,112 @@ from PySide6.QtWidgets import (
     QScrollArea, QFrame,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 
 from oh.ui.style import sc
 
 logger = logging.getLogger(__name__)
 
-# Column indices
-_COL_SOURCE = 0   # Source name
-_COL_STATUS = 1   # Active / Historical
-_COL_FOLLOWS = 2  # Follow count
-_COL_FBACKS = 3   # Followback count
-_COL_FBR = 4      # FBR %
-_COL_QUALITY = 5  # Quality flag
 
-_HEADERS = ["Source", "Status", "Follows", "FBacks", "FBR %", "Quality"]
+# ---------------------------------------------------------------------------
+# Shared helper for building a sources table
+# ---------------------------------------------------------------------------
+
+def _build_sources_table(
+    headers: List[str],
+    stretch_col: int = 0,
+) -> QTableWidget:
+    """Create a pre-configured QTableWidget for source data."""
+    table = QTableWidget(0, len(headers))
+    table.setHorizontalHeaderLabels(headers)
+    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    table.verticalHeader().setVisible(False)
+    table.setAlternatingRowColors(True)
+    table.setStyleSheet("font-size: 11px;")
+
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(stretch_col, QHeaderView.ResizeMode.Stretch)
+    for col in range(len(headers)):
+        if col != stretch_col:
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+
+    return table
+
+
+def _populate_table(
+    table: QTableWidget,
+    sources: List[dict],
+    count_key: str,
+    back_key: str,
+    rate_key: str,
+    rate_label: str,
+    count_label: str,
+    back_label: str,
+) -> None:
+    """Fill a sources table with data rows."""
+    green = sc("success")
+    muted = sc("muted")
+
+    table.setRowCount(len(sources))
+
+    for row, src in enumerate(sources):
+        # Source name (col 0)
+        name_item = QTableWidgetItem(src.get("source_name", ""))
+        table.setItem(row, 0, name_item)
+
+        # Status (col 1)
+        is_active = src.get("is_active", False)
+        status_item = QTableWidgetItem("Active" if is_active else "Historical")
+        status_item.setForeground(green if is_active else muted)
+        table.setItem(row, 1, status_item)
+
+        # Count (col 2) — follows or likes
+        count_val = src.get(count_key, 0) or 0
+        count_item = QTableWidgetItem(str(count_val))
+        count_item.setTextAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        table.setItem(row, 2, count_item)
+
+        # Followbacks (col 3)
+        backs = src.get(back_key, 0) or 0
+        back_item = QTableWidgetItem(str(backs))
+        back_item.setTextAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        table.setItem(row, 3, back_item)
+
+        # Rate % (col 4) — FBR or LBR
+        rate = src.get(rate_key, 0) or 0
+        rate_item = QTableWidgetItem("%.1f%%" % rate)
+        rate_item.setTextAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        if rate >= 10:
+            rate_item.setForeground(green)
+        elif rate < 5:
+            rate_item.setForeground(muted)
+        table.setItem(row, 4, rate_item)
+
+        # Quality flag (col 5)
+        is_quality = src.get("is_quality", False)
+        quality_item = QTableWidgetItem("Y" if is_quality else "-")
+        quality_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        quality_item.setForeground(green if is_quality else muted)
+        table.setItem(row, 5, quality_item)
+
+
+# ---------------------------------------------------------------------------
+# Main widget
+# ---------------------------------------------------------------------------
+
+_FBR_HEADERS = ["Source", "Status", "Follows", "FBacks", "FBR %", "Quality"]
+_LBR_HEADERS = ["Source", "Status", "Likes", "FBacks", "LBR %", "Quality"]
 
 
 class AccountSourcesTab(QScrollArea):
-    """Scrollable sources tab for the account detail drawer."""
+    """Scrollable sources tab showing Follow + Like sources for one account."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -43,29 +131,26 @@ class AccountSourcesTab(QScrollArea):
         self._root.setContentsMargins(6, 6, 6, 6)
         self._root.setSpacing(6)
 
-        # Header label
-        self._header_label = QLabel("Sources")
-        self._header_label.setStyleSheet(
+        # --- Follow Sources section ---
+        self._follow_header = QLabel("Follow Sources")
+        self._follow_header.setStyleSheet(
             "font-size: 12px; font-weight: bold; color: %s;" % sc("heading").name()
         )
-        self._root.addWidget(self._header_label)
+        self._root.addWidget(self._follow_header)
 
-        # Table
-        self._table = QTableWidget(0, len(_HEADERS))
-        self._table.setHorizontalHeaderLabels(_HEADERS)
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setAlternatingRowColors(True)
-        self._table.setStyleSheet("font-size: 11px;")
+        self._follow_table = _build_sources_table(_FBR_HEADERS)
+        self._root.addWidget(self._follow_table)
 
-        header = self._table.horizontalHeader()
-        header.setSectionResizeMode(_COL_SOURCE, QHeaderView.ResizeMode.Stretch)
-        for col in (_COL_STATUS, _COL_FOLLOWS, _COL_FBACKS, _COL_FBR, _COL_QUALITY):
-            header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        # --- Like Sources section ---
+        self._like_header = QLabel("Like Sources")
+        self._like_header.setStyleSheet(
+            "font-size: 12px; font-weight: bold; color: %s;" % sc("heading").name()
+        )
+        self._root.addWidget(self._like_header)
 
-        self._root.addWidget(self._table)
+        self._like_table = _build_sources_table(_LBR_HEADERS)
+        self._root.addWidget(self._like_table)
+
         self._root.addStretch()
         self.setWidget(self._container)
 
@@ -74,83 +159,98 @@ class AccountSourcesTab(QScrollArea):
     # ------------------------------------------------------------------
 
     def load_sources(self, sources: List[dict]) -> None:
-        """Populate table from a list of source dicts.
+        """Populate the Follow sources table.
 
         Each dict should have keys:
             source_name, is_active, follow_count, followback_count,
             fbr_percent, is_quality
         """
-        self._table.setRowCount(0)
+        self._follow_table.setRowCount(0)
 
         if not sources:
-            self._header_label.setText("Sources (none)")
-            self._table.setRowCount(1)
-            msg = QTableWidgetItem("No source data available. Run FBR Analysis first.")
+            self._follow_header.setText("Follow Sources (none)")
+            self._follow_table.setRowCount(1)
+            msg = QTableWidgetItem(
+                "No follow source data. Run FBR Analysis first."
+            )
             msg.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             msg.setForeground(sc("muted"))
-            self._table.setItem(0, 0, msg)
-            self._table.setSpan(0, 0, 1, self._table.columnCount())
+            self._follow_table.setItem(0, 0, msg)
+            self._follow_table.setSpan(0, 0, 1, self._follow_table.columnCount())
             return
 
-        active_count = sum(1 for s in sources if s.get("is_active", False))
-        hist_count = len(sources) - active_count
-        self._header_label.setText(
-            "Sources (%d active, %d historical)" % (active_count, hist_count)
+        active = sum(1 for s in sources if s.get("is_active", False))
+        hist = len(sources) - active
+        self._follow_header.setText(
+            "Follow Sources (%d active, %d historical)" % (active, hist)
         )
 
-        # Sort: active first, then by FBR descending
         sorted_sources = sorted(
             sources,
-            key=lambda s: (not s.get("is_active", False), -(s.get("fbr_percent", 0) or 0)),
+            key=lambda s: (
+                not s.get("is_active", False),
+                -(s.get("fbr_percent", 0) or 0),
+            ),
         )
 
-        self._table.setRowCount(len(sorted_sources))
+        _populate_table(
+            self._follow_table, sorted_sources,
+            count_key="follow_count",
+            back_key="followback_count",
+            rate_key="fbr_percent",
+            rate_label="FBR %",
+            count_label="Follows",
+            back_label="FBacks",
+        )
 
-        green = sc("success")
-        red = sc("error")
-        muted = sc("muted")
+    def load_like_sources(self, sources: List[dict]) -> None:
+        """Populate the Like sources table.
 
-        for row, src in enumerate(sorted_sources):
-            # Source name
-            name_item = QTableWidgetItem(src.get("source_name", ""))
-            self._table.setItem(row, _COL_SOURCE, name_item)
+        Each dict should have keys:
+            source_name, is_active, like_count, followback_count,
+            lbr_percent, is_quality
+        """
+        self._like_table.setRowCount(0)
 
-            # Status
-            is_active = src.get("is_active", False)
-            status_item = QTableWidgetItem("Active" if is_active else "Historical")
-            status_item.setForeground(green if is_active else muted)
-            self._table.setItem(row, _COL_STATUS, status_item)
+        if not sources:
+            self._like_header.setText("Like Sources (none)")
+            self._like_table.setRowCount(1)
+            msg = QTableWidgetItem(
+                "No like source data. Run LBR Analysis first."
+            )
+            msg.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            msg.setForeground(sc("muted"))
+            self._like_table.setItem(0, 0, msg)
+            self._like_table.setSpan(0, 0, 1, self._like_table.columnCount())
+            return
 
-            # Follow count
-            follows = src.get("follow_count", 0) or 0
-            follow_item = QTableWidgetItem(str(follows))
-            follow_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._table.setItem(row, _COL_FOLLOWS, follow_item)
+        active = sum(1 for s in sources if s.get("is_active", False))
+        hist = len(sources) - active
+        self._like_header.setText(
+            "Like Sources (%d active, %d historical)" % (active, hist)
+        )
 
-            # Followback count
-            fbacks = src.get("followback_count", 0) or 0
-            fback_item = QTableWidgetItem(str(fbacks))
-            fback_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._table.setItem(row, _COL_FBACKS, fback_item)
+        sorted_sources = sorted(
+            sources,
+            key=lambda s: (
+                not s.get("is_active", False),
+                -(s.get("lbr_percent", 0) or 0),
+            ),
+        )
 
-            # FBR %
-            fbr_pct = src.get("fbr_percent", 0) or 0
-            fbr_item = QTableWidgetItem("%.1f%%" % fbr_pct)
-            fbr_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            if fbr_pct >= 10:
-                fbr_item.setForeground(green)
-            elif fbr_pct < 5:
-                fbr_item.setForeground(muted)
-            self._table.setItem(row, _COL_FBR, fbr_item)
-
-            # Quality flag
-            is_quality = src.get("is_quality", False)
-            quality_item = QTableWidgetItem("Y" if is_quality else "-")
-            quality_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            quality_item.setForeground(green if is_quality else muted)
-            self._table.setItem(row, _COL_QUALITY, quality_item)
+        _populate_table(
+            self._like_table, sorted_sources,
+            count_key="like_count",
+            back_key="followback_count",
+            rate_key="lbr_percent",
+            rate_label="LBR %",
+            count_label="Likes",
+            back_label="FBacks",
+        )
 
     def clear(self) -> None:
-        """Reset the table to empty state."""
-        self._table.setRowCount(0)
-        self._header_label.setText("Sources")
+        """Reset both tables to empty state."""
+        self._follow_table.setRowCount(0)
+        self._follow_header.setText("Follow Sources")
+        self._like_table.setRowCount(0)
+        self._like_header.setText("Like Sources")

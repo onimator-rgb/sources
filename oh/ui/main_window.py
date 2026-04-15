@@ -17,6 +17,8 @@ Layout:
   │  Status bar                                                     │
   └─────────────────────────────────────────────────────────────────┘
 """
+from __future__ import annotations
+
 import os
 import subprocess
 import logging
@@ -60,13 +62,21 @@ from oh.services.target_splitter_service import TargetSplitterService
 from oh.resources import asset_path, asset_exists
 from oh.ui.account_detail_panel import AccountDetailPanel
 from oh.ui.device_fleet_tab import DeviceFleetTab
+from oh.ui.notifications_tab import NotificationsTab
+from oh.services.notification_service import NotificationService
 from oh.ui.settings_tab import SettingsTab
 from oh.ui.source_dialog import SourceDialog
 from oh.ui.source_profiles_tab import SourceProfilesTab
 from oh.ui.sources_tab import SourcesTab
+from oh.ui.like_sources_tab import LikeSourcesTab
+from oh.ui.sources_tab_container import SourcesTabContainer
 from oh.ui.help_button import HelpButton
 from oh.ui.workers import WorkerThread
 from oh.repositories.source_profile_repo import SourceProfileRepository
+from oh.repositories.lbr_snapshot_repo import LBRSnapshotRepository
+from oh.repositories.like_source_assignment_repo import LikeSourceAssignmentRepository
+from oh.services.global_like_sources_service import GlobalLikeSourcesService
+from oh.services.lbr_service import LBRService
 from oh.services.settings_copier_service import SettingsCopierService
 from oh.services.warmup_template_service import WarmupTemplateService
 
@@ -251,6 +261,7 @@ class MainWindow(QMainWindow):
         self._all_accounts: list = []
         self._last_discovery: list = []
         self._fbr_map: dict[int, FBRSnapshotRecord] = {}
+        self._lbr_map: dict = {}  # account_id → LBRSnapshotRecord
         self._source_count_map: dict[int, int] = {}
         self._session_map: dict[int, AccountSessionRecord] = {}
         self._device_status_map: dict[str, str] = {}  # device_id → last_known_status
@@ -279,6 +290,31 @@ class MainWindow(QMainWindow):
             target_splitter_service=self._target_splitter_service,
             account_group_repo=self._account_group_repo,
         )
+
+        # LBR repos + services
+        self._lbr_snapshot_repo = LBRSnapshotRepository(conn)
+        self._like_assignment_repo = LikeSourceAssignmentRepository(conn)
+        self._global_like_sources_service = GlobalLikeSourcesService(
+            self._lbr_snapshot_repo,
+            self._like_assignment_repo,
+            self._accounts,
+        )
+        self._lbr_service = LBRService(
+            self._lbr_snapshot_repo,
+            self._accounts,
+            self._settings,
+            self._like_assignment_repo,
+        )
+        self._like_sources_tab = LikeSourcesTab(
+            self._global_like_sources_service,
+            self._lbr_service,
+            settings_repo=self._settings,
+            conn=conn,
+        )
+        self._sources_container = SourcesTabContainer(
+            self._sources_tab, self._like_sources_tab,
+        )
+
         self._settings_tab = SettingsTab(
             self._settings,
             source_finder_service=self._source_finder_service,
@@ -287,6 +323,8 @@ class MainWindow(QMainWindow):
         self._source_profile_repo = SourceProfileRepository(conn)
         self._source_profiles_tab = SourceProfilesTab(self._source_profile_repo)
         self._fleet_tab = DeviceFleetTab(conn)
+        self._notification_service = NotificationService(conn)
+        self._notifications_tab = NotificationsTab(self._notification_service)
         self._build_ui()
         self._refresh_table()
         self._update_last_sync_label()
@@ -323,9 +361,10 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget()
         self._tabs.setObjectName("tabWidget")
         self._tabs.addTab(self._make_accounts_page(), "Accounts")
-        self._tabs.addTab(self._sources_tab, "Sources")
+        self._tabs.addTab(self._sources_container, "Sources")
         self._tabs.addTab(self._source_profiles_tab, "Source Profiles")
         self._tabs.addTab(self._fleet_tab, "Fleet")
+        self._tabs.addTab(self._notifications_tab, "Notifications")
         self._tabs.addTab(self._settings_tab, "Settings")
         self._tabs.currentChanged.connect(self._on_tab_changed)
         outer.addWidget(self._tabs, stretch=1)
@@ -379,15 +418,19 @@ class MainWindow(QMainWindow):
         return page
 
     def _on_tab_changed(self, index: int) -> None:
-        if index == 1:  # Sources tab
-            self._sources_tab.set_bot_root(self._settings.get_bot_root())
-            self._sources_tab.load_data()
+        if index == 1:  # Sources tab (container with Follow + Like sub-tabs)
+            self._sources_container.set_bot_root(self._settings.get_bot_root())
+            self._sources_container.load_data()
         elif index == 2:  # Source Profiles tab
             self._source_profiles_tab.load_data()
         elif index == 3:  # Fleet tab
             if not self._fleet_tab._loaded:
                 self._fleet_tab.load_data()
-        elif index == 4:  # Settings tab — reload in case values changed externally
+        elif index == 4:  # Notifications tab
+            self._notifications_tab.set_bot_root(self._settings.get_bot_root())
+            if not self._notifications_tab._loaded:
+                self._notifications_tab.load_data()
+        elif index == 5:  # Settings tab — reload in case values changed externally
             self._settings_tab._load()
 
     def _make_brand_bar(self) -> QFrame:
@@ -516,6 +559,15 @@ class MainWindow(QMainWindow):
         )
         self._fbr_btn.clicked.connect(self._on_analyze_fbr)
 
+        self._lbr_btn = QPushButton("Analyze LBR")
+        self._lbr_btn.setFixedHeight(34)
+        self._lbr_btn.setSizePolicy(_btn_policy)
+        self._lbr_btn.setToolTip(
+            "Run LBR (Like-Back Rate) analysis for all active accounts\n"
+            "that have likes.db and save results to the OH database"
+        )
+        self._lbr_btn.clicked.connect(self._on_analyze_lbr)
+
         refresh_btn = QPushButton("Refresh")
         refresh_btn.setFixedHeight(34)
         refresh_btn.setSizePolicy(_btn_policy)
@@ -581,9 +633,11 @@ class MainWindow(QMainWindow):
         ))
         lo.addWidget(self._scan_btn)
         lo.addWidget(self._fbr_btn)
+        lo.addWidget(self._lbr_btn)
         lo.addWidget(HelpButton(
-            "Computes Follow-Back Rate for all sources. Shows which "
-            "sources bring followers back.",
+            "FBR = Follow-Back Rate (from follow sources).\n"
+            "LBR = Like-Back Rate (from like sources).\n"
+            "Shows which sources bring followers back.",
         ))
         lo.addWidget(refresh_btn)
         lo.addWidget(self._report_btn)
@@ -1185,6 +1239,29 @@ class MainWindow(QMainWindow):
                 self._detail_panel._sources_tab.load_sources([])
         except Exception as exc:
             logger.debug("Failed to load sources for drawer: %s", exc)
+
+        # --- Like Sources (LBR) ---
+        try:
+            lbr_snap = self._lbr_map.get(account_id)
+            if lbr_snap is not None and lbr_snap.id is not None:
+                from oh.repositories.lbr_snapshot_repo import LBRSnapshotRepository
+                lbr_repo = LBRSnapshotRepository(self._conn)
+                lbr_results = lbr_repo.get_source_results(lbr_snap.id)
+                like_data = []
+                for lr in lbr_results:
+                    like_data.append({
+                        "source_name": lr.source_name,
+                        "is_active": True,
+                        "like_count": lr.like_count,
+                        "followback_count": lr.followback_count,
+                        "lbr_percent": lr.lbr_percent,
+                        "is_quality": lr.is_quality,
+                    })
+                self._detail_panel._sources_tab.load_like_sources(like_data)
+            else:
+                self._detail_panel._sources_tab.load_like_sources([])
+        except Exception as exc:
+            logger.debug("Failed to load like sources for drawer: %s", exc)
 
         # --- History tab ---
         try:
@@ -2212,7 +2289,8 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid Bot Root", str(exc))
             return
-        self._sources_tab.set_bot_root(path)
+        self._sources_container.set_bot_root(path)
+        self._notifications_tab.set_bot_root(path)
         self._set_status(f"Bot root saved: {path}")
 
     def _on_scan_and_sync(self) -> None:
@@ -2482,6 +2560,34 @@ class MainWindow(QMainWindow):
         # If the Sources tab is currently open, refresh it too
         if self._tabs.currentIndex() == 1:
             self._sources_tab.load_data()
+
+    # ------------------------------------------------------------------
+    # LBR analysis (Like-Back Rate)
+    # ------------------------------------------------------------------
+
+    def _on_analyze_lbr(self) -> None:
+        bot_root = self._get_validated_root()
+        if not bot_root:
+            return
+
+        self._set_busy(True, "Running LBR analysis...")
+
+        def do_lbr():
+            return self._lbr_service.analyze_all_active(bot_root)
+
+        self._worker = WorkerThread(do_lbr)
+        self._worker.result.connect(self._on_lbr_batch_done)
+        self._worker.error.connect(self._on_worker_error)
+        self._worker.finished.connect(lambda: self._set_busy(False))
+        self._worker.start()
+
+    def _on_lbr_batch_done(self, result) -> None:
+        self._set_status(f"LBR analysis complete — {result.status_line()}")
+        self._lbr_map = self._lbr_service.get_latest_map()
+
+        # If the Sources tab is currently open, refresh like sources sub-tab
+        if self._tabs.currentIndex() == 1:
+            self._sources_container.load_data()
 
     # ------------------------------------------------------------------
     # User actions — sources dialog

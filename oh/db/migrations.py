@@ -651,6 +651,68 @@ UPDATE source_assignments SET created_at = updated_at WHERE created_at IS NULL;
 """
 
 # ---------------------------------------------------------------------------
+# Migration 017 — LBR (Like-Back Rate) tables: snapshots, source results,
+# and like source assignments — mirrors FBR structure for like analytics
+# ---------------------------------------------------------------------------
+
+_MIGRATION_017_SQL = """
+CREATE TABLE IF NOT EXISTS lbr_snapshots (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id          INTEGER NOT NULL REFERENCES oh_accounts(id),
+    device_id           TEXT    NOT NULL,
+    username            TEXT    NOT NULL,
+    analyzed_at         TEXT    NOT NULL,
+    min_likes           INTEGER NOT NULL DEFAULT 50,
+    min_lbr_pct         REAL    NOT NULL DEFAULT 5.0,
+    total_sources       INTEGER NOT NULL DEFAULT 0,
+    quality_sources     INTEGER NOT NULL DEFAULT 0,
+    status              TEXT    NOT NULL DEFAULT 'ok',
+    best_lbr_pct        REAL,
+    best_lbr_source     TEXT,
+    highest_vol_source  TEXT,
+    highest_vol_count   INTEGER DEFAULT 0,
+    below_volume_count  INTEGER NOT NULL DEFAULT 0,
+    anomaly_count       INTEGER NOT NULL DEFAULT 0,
+    warnings_json       TEXT,
+    schema_error        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_lbr_snapshots_account
+    ON lbr_snapshots (account_id, analyzed_at DESC);
+
+CREATE TABLE IF NOT EXISTS lbr_source_results (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id      INTEGER NOT NULL REFERENCES lbr_snapshots(id),
+    source_name      TEXT    NOT NULL,
+    like_count       INTEGER NOT NULL DEFAULT 0,
+    followback_count INTEGER NOT NULL DEFAULT 0,
+    lbr_percent      REAL    NOT NULL DEFAULT 0.0,
+    is_quality       INTEGER NOT NULL DEFAULT 0,
+    anomaly          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_lbr_source_results_snapshot
+    ON lbr_source_results (snapshot_id);
+
+CREATE TABLE IF NOT EXISTS like_source_assignments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL REFERENCES oh_accounts(id),
+    source_name TEXT    NOT NULL,
+    is_active   INTEGER NOT NULL DEFAULT 1,
+    snapshot_id INTEGER REFERENCES lbr_snapshots(id),
+    updated_at  TEXT,
+    created_at  TEXT,
+    UNIQUE(account_id, source_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_like_source_assignments_account
+    ON like_source_assignments (account_id);
+
+CREATE INDEX IF NOT EXISTS idx_like_source_assignments_source
+    ON like_source_assignments (source_name)
+"""
+
+# ---------------------------------------------------------------------------
 # Registry — append new entries here, never modify existing ones
 # ---------------------------------------------------------------------------
 
@@ -671,6 +733,7 @@ _MIGRATIONS: List[Tuple[int, str, str]] = [
     (14, "auto_fix_actions",            _MIGRATION_014_SQL),
     (15, "warmup_templates",             _MIGRATION_015_SQL),
     (16, "source_created_at",            _MIGRATION_016_SQL),
+    (17, "lbr_tables",                   _MIGRATION_017_SQL),
 ]
 
 
