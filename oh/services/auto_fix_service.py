@@ -13,6 +13,7 @@ Features:
   4. Duplicate Source Cleanup: detect duplicate entries in sources.txt
 """
 import logging
+import shutil
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -400,12 +401,13 @@ class AutoFixService:
                 clean_lines.append(stripped)
 
         if duplicates_found > 0:
-            # Backup first
+            # Backup first (copy, so original stays intact if write fails)
             bak_path = sources_path.with_suffix(".txt.bak")
-            sources_path.rename(bak_path)
+            shutil.copy2(sources_path, bak_path)
             sources_path.write_text(
                 "\n".join(clean_lines) + "\n", encoding="utf-8"
             )
+            bak_path.unlink(missing_ok=True)
             self._log_action(
                 "duplicate_cleanup", acc.username, acc.device_id,
                 f"Removed {duplicates_found} duplicate source(s)", duplicates_found,
