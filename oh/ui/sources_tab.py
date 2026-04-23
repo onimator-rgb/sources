@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QLabel, QLineEdit, QSpinBox, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QFileDialog, QMessageBox,
+    QFileDialog, QMessageBox, QMenu,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -350,6 +350,11 @@ class SourcesTab(QWidget):
         t.setColumnWidth(_COL_UPDATED,  95)
 
         t.selectionModel().selectionChanged.connect(self._on_source_selected)
+
+        # Context menu (right-click)
+        t.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        t.customContextMenuRequested.connect(self._on_sources_context_menu)
+
         self._sources_table = t
         return t
 
@@ -749,6 +754,50 @@ class SourcesTab(QWidget):
             self._detail_table.setItem(r, _D_USED_PCT, pct_item)
 
         self._detail_table.setSortingEnabled(True)
+
+    # ------------------------------------------------------------------
+    # Context menu
+    # ------------------------------------------------------------------
+
+    def _on_sources_context_menu(self, pos) -> None:
+        """Right-click context menu for the follow sources table."""
+        row = self._sources_table.rowAt(pos.y())
+        if row < 0:
+            return
+
+        item = self._sources_table.item(row, _COL_SOURCE)
+        if not item:
+            return
+        source_name = item.data(Qt.ItemDataRole.UserRole)
+        if not source_name:
+            return
+
+        # Select the row so that _on_delete_source picks it up
+        self._sources_table.selectRow(row)
+
+        menu = QMenu(self)
+
+        menu.addAction(
+            "Copy Source Name",
+            lambda: self._copy_text_to_clipboard(source_name),
+        )
+
+        menu.addSeparator()
+
+        delete_action = menu.addAction(
+            "Delete Source",
+            self._on_delete_source,
+        )
+        delete_action.setEnabled(bool(self._bot_root))
+
+        menu.exec(self._sources_table.viewport().mapToGlobal(pos))
+
+    def _copy_text_to_clipboard(self, text: str) -> None:
+        """Copy text to the system clipboard."""
+        from PySide6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            clipboard.setText(text)
 
     # ------------------------------------------------------------------
     # Delete actions
