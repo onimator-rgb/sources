@@ -16,7 +16,7 @@ from typing import Optional
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QFont, QIcon
 
-from oh.db.connection import get_connection, get_db_path, close_connection, backup_database
+from oh.db.connection import get_connection, get_db_path, close_connection, close_all_connections, backup_database
 from oh.db.migrations import run_migrations
 from oh.repositories.account_repo import AccountRepository
 from oh.repositories.delete_history_repo import DeleteHistoryRepository
@@ -520,7 +520,7 @@ def main() -> None:
 
     exit_code = app.exec()
     logger.info(f"OH exiting with code {exit_code}.")
-    close_connection()
+    close_all_connections()
     sys.exit(exit_code)
 
 
