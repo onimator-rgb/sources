@@ -16,7 +16,7 @@ from typing import Optional
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QFont, QIcon
 
-from oh.db.connection import get_connection, get_db_path, close_connection
+from oh.db.connection import get_connection, get_db_path, close_connection, backup_database
 from oh.db.migrations import run_migrations
 from oh.repositories.account_repo import AccountRepository
 from oh.repositories.delete_history_repo import DeleteHistoryRepository
@@ -241,7 +241,8 @@ def _write_version_file(version: str) -> None:
 # ---------------------------------------------------------------------------
 
 def bootstrap(conn) -> None:
-    """Apply migrations, seed config defaults, recover interrupted sync runs."""
+    """Back up database, apply migrations, seed config defaults, recover interrupted sync runs."""
+    backup_database()
     logger.info("Running database migrations…")
     run_migrations(conn)
 
