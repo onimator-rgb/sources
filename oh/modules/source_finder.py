@@ -365,6 +365,26 @@ class HikerClient:
                 logger.debug("GET %s -> 404 (%.3fs)", path, elapsed)
                 return None
 
+            if resp.status_code == 401:
+                logger.error(
+                    "GET %s -> 401 Unauthorized (%.3fs)", path, elapsed,
+                )
+                raise HikerAPIError(
+                    "HikerAPI key is invalid or expired. "
+                    "Go to Settings and check your HikerAPI key, "
+                    "or renew your subscription at hikerapi.com."
+                )
+
+            if resp.status_code == 403:
+                logger.error(
+                    "GET %s -> 403 Forbidden (%.3fs)", path, elapsed,
+                )
+                raise HikerAPIError(
+                    "HikerAPI access denied. Your subscription plan "
+                    "may not include this endpoint, or the key has "
+                    "been revoked. Check your account at hikerapi.com."
+                )
+
             if resp.status_code == 422:
                 try:
                     detail = resp.json().get("detail", resp.text)
