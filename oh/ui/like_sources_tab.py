@@ -24,6 +24,7 @@ from oh.models.global_like_source import GlobalLikeSourceRecord, LikeSourceAccou
 from oh.services.global_like_sources_service import GlobalLikeSourcesService
 from oh.services.lbr_service import LBRService
 from oh.ui.style import sc, BTN_HEIGHT_MD
+from oh.ui.table_utils import SortableItem
 from oh.ui.workers import WorkerThread
 
 logger = logging.getLogger(__name__)
@@ -83,24 +84,6 @@ _FILT_NO_DATA   = "No LBR data"
 _FILT_ACTIVE    = "Active only"
 
 
-# ---------------------------------------------------------------------------
-# Shared sortable item
-# ---------------------------------------------------------------------------
-
-class _SortableItem(QTableWidgetItem):
-    """QTableWidgetItem sorted by an explicit key rather than display text."""
-
-    def __init__(self, display_text: str, sort_key) -> None:
-        super().__init__(display_text)
-        self._sort_key = sort_key
-
-    def __lt__(self, other: QTableWidgetItem) -> bool:
-        if isinstance(other, _SortableItem):
-            try:
-                return self._sort_key < other._sort_key
-            except TypeError:
-                return str(self._sort_key) < str(other._sort_key)
-        return self.text() < other.text()
 
 
 # ---------------------------------------------------------------------------
@@ -466,8 +449,8 @@ class LikeSourcesTab(QWidget):
         self._sources_table.setSpan(0, 0, 1, 1)
         center = Qt.AlignmentFlag.AlignCenter
 
-        def _si(text: str, key, color: Optional[QColor] = None) -> _SortableItem:
-            item = _SortableItem(text, key)
+        def _si(text: str, key, color: Optional[QColor] = None) -> SortableItem:
+            item = SortableItem(text, key)
             item.setTextAlignment(center)
             if color:
                 item.setForeground(color)
@@ -478,7 +461,7 @@ class LikeSourcesTab(QWidget):
             self._sources_table.insertRow(r)
 
             # Source name
-            name_item = _SortableItem(src.source_name, src.source_name.lower())
+            name_item = SortableItem(src.source_name, src.source_name.lower())
             name_item.setData(Qt.ItemDataRole.UserRole, src.source_name)
             self._sources_table.setItem(r, _COL_SOURCE, name_item)
 
@@ -591,8 +574,8 @@ class LikeSourcesTab(QWidget):
 
         center = Qt.AlignmentFlag.AlignCenter
 
-        def _si(text: str, key, color: Optional[QColor] = None) -> _SortableItem:
-            item = _SortableItem(text, key)
+        def _si(text: str, key, color: Optional[QColor] = None) -> SortableItem:
+            item = SortableItem(text, key)
             item.setTextAlignment(center)
             if color:
                 item.setForeground(color)

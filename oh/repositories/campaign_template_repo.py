@@ -1,16 +1,12 @@
 """CRUD for campaign_templates table."""
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from oh.models.campaign_template import CampaignTemplate
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class CampaignTemplateRepository:
@@ -18,7 +14,7 @@ class CampaignTemplateRepository:
         self._conn = conn
 
     def create(self, template: CampaignTemplate) -> CampaignTemplate:
-        now = _utcnow()
+        now = utcnow()
         cursor = self._conn.execute(
             """INSERT INTO campaign_templates
                (name, description, niche, language, min_sources, source_niche,
@@ -46,7 +42,7 @@ class CampaignTemplateRepository:
             (template.name, template.description, template.niche, template.language,
              template.min_sources, template.source_niche, template.follow_limit,
              template.like_limit, template.tb_level, template.limits_level,
-             template.settings_json, _utcnow(), template.id),
+             template.settings_json, utcnow(), template.id),
         )
         self._conn.commit()
 

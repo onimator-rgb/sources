@@ -4,16 +4,12 @@ Soft-delete: removed accounts keep their row with removed_at set.
 """
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from oh.models.account import AccountRecord
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class AccountRepository:
@@ -171,7 +167,7 @@ class AccountRepository:
             SET review_flag = 1, review_note = ?, review_set_at = ?
             WHERE id = ?
             """,
-            (note, _utcnow(), account_id),
+            (note, utcnow(), account_id),
         )
         self._conn.commit()
 

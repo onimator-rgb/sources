@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from oh.models.lbr import LBRAnalysisResult
@@ -27,16 +26,13 @@ from oh.repositories.account_repo import AccountRepository
 from oh.repositories.lbr_snapshot_repo import LBRSnapshotRepository
 from oh.repositories.settings_repo import SettingsRepository
 from oh.repositories.like_source_assignment_repo import LikeSourceAssignmentRepository
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
 # Default LBR thresholds — used when no settings keys exist
 _DEFAULT_MIN_LIKES = 50
 _DEFAULT_MIN_LBR_PCT = 5.0
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class LBRService:
@@ -228,7 +224,7 @@ class LBRService:
                 account_id=account_id,
                 device_id=result.device_id,
                 username=result.username,
-                analyzed_at=_utcnow(),
+                analyzed_at=utcnow(),
                 min_likes=result.min_likes,
                 min_lbr_pct=result.min_lbr_pct,
                 total_sources=0,
@@ -242,7 +238,7 @@ class LBRService:
                 account_id=account_id,
                 device_id=result.device_id,
                 username=result.username,
-                analyzed_at=_utcnow(),
+                analyzed_at=utcnow(),
                 min_likes=result.min_likes,
                 min_lbr_pct=result.min_lbr_pct,
                 total_sources=0,
@@ -258,7 +254,7 @@ class LBRService:
             account_id=account_id,
             device_id=result.device_id,
             username=result.username,
-            analyzed_at=_utcnow(),
+            analyzed_at=utcnow(),
             min_likes=result.min_likes,
             min_lbr_pct=result.min_lbr_pct,
             total_sources=result.total_count,

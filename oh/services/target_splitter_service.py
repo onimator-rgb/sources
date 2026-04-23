@@ -18,7 +18,6 @@ SAFETY:
 import logging
 import re
 import socket
-from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from oh.models.account import AccountRecord
@@ -28,12 +27,9 @@ from oh.modules.source_restorer import SourceRestorer
 from oh.repositories.account_repo import AccountRepository
 from oh.repositories.operator_action_repo import OperatorActionRepository
 from oh.repositories.source_assignment_repo import SourceAssignmentRepository
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class TargetSplitterService:

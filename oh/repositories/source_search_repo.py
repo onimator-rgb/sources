@@ -12,12 +12,9 @@ from oh.models.source_finder import (
     SourceSearchRecord,
     SourceSearchResult,
 )
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class SourceSearchRepository:
@@ -30,7 +27,7 @@ class SourceSearchRepository:
 
     def create_search(self, account_id: int, username: str) -> SourceSearchRecord:
         """Create a new search record and return it with id set."""
-        now = _utcnow()
+        now = utcnow()
         cursor = self._conn.execute(
             """
             INSERT INTO source_searches (account_id, username, started_at, status, step_reached)
@@ -77,7 +74,7 @@ class SourceSearchRepository:
             SET status=?, completed_at=?, error_message=?
             WHERE id=?
             """,
-            (status, _utcnow(), error_message, search_id),
+            (status, utcnow(), error_message, search_id),
         )
         self._conn.commit()
 
@@ -94,7 +91,7 @@ class SourceSearchRepository:
             SET status='failed', completed_at=?, error_message='Stale search recovered'
             WHERE status='running' AND started_at < ?
             """,
-            (_utcnow(), cutoff.isoformat()),
+            (utcnow(), cutoff.isoformat()),
         )
         self._conn.commit()
         count = cursor.rowcount
@@ -239,7 +236,7 @@ class SourceSearchRepository:
             SET added_to_sources=1, added_at=?
             WHERE id=?
             """,
-            (_utcnow(), result_id),
+            (utcnow(), result_id),
         )
         self._conn.commit()
 

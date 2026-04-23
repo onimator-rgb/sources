@@ -19,14 +19,11 @@ use conn.execute() so everything stays inside one 'with conn:' transaction.
 """
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import List, Tuple
 
+from oh.utils import utcnow
+
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _ensure_migrations_table(conn: sqlite3.Connection) -> None:
@@ -754,7 +751,7 @@ def run_migrations(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     "INSERT INTO schema_migrations (version, name, applied_at) "
                     "VALUES (?, ?, ?)",
-                    (version, name, _utcnow()),
+                    (version, name, utcnow()),
                 )
             logger.info(f"Migration {version} applied.")
         except sqlite3.Error as e:

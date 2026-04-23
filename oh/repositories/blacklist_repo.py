@@ -1,14 +1,11 @@
 """Read/write access to source_blacklist table."""
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import List, Set
 
+from oh.utils import utcnow
+
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class BlacklistRepository:
@@ -18,7 +15,7 @@ class BlacklistRepository:
     def add(self, source_name: str, reason: str = "") -> None:
         self._conn.execute(
             "INSERT OR IGNORE INTO source_blacklist (source_name, reason, added_at) VALUES (?, ?, ?)",
-            (source_name.strip().lower(), reason, _utcnow()),
+            (source_name.strip().lower(), reason, utcnow()),
         )
         self._conn.commit()
 

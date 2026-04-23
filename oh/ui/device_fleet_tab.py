@@ -29,6 +29,7 @@ from oh.repositories.tag_repo import TagRepository
 from oh.repositories.settings_repo import SettingsRepository
 from oh.services.account_health_service import AccountHealthService
 from oh.ui.style import sc
+from oh.ui.table_utils import SortableItem
 
 logger = logging.getLogger(__name__)
 
@@ -63,26 +64,6 @@ _DET_TAGS     = 5
 _DET_HEADERS = [
     "Username", "Status", "Health", "Active Sources", "Best FBR%", "Tags",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Sortable table item
-# ---------------------------------------------------------------------------
-
-class _SortableItem(QTableWidgetItem):
-    """QTableWidgetItem sorted by an explicit key rather than display text."""
-
-    def __init__(self, display_text: str, sort_key) -> None:
-        super().__init__(display_text)
-        self._sort_key = sort_key
-
-    def __lt__(self, other: QTableWidgetItem) -> bool:
-        if isinstance(other, _SortableItem):
-            try:
-                return self._sort_key < other._sort_key
-            except TypeError:
-                return str(self._sort_key) < str(other._sort_key)
-        return self.text() < other.text()
 
 
 # ---------------------------------------------------------------------------
@@ -380,15 +361,15 @@ class DeviceFleetTab(QWidget):
         self._table.setItem(row, _COL_STATUS, item)
 
         # --- Accounts ---
-        item = _SortableItem(str(total), total)
+        item = SortableItem(str(total), total)
         self._table.setItem(row, _COL_ACCOUNTS, item)
 
         # --- Active ---
-        item = _SortableItem(str(active), active)
+        item = SortableItem(str(active), active)
         self._table.setItem(row, _COL_ACTIVE, item)
 
         # --- Active % ---
-        item = _SortableItem(f"{active_pct:.0f}%", active_pct)
+        item = SortableItem(f"{active_pct:.0f}%", active_pct)
         if active_pct >= 90:
             item.setForeground(sc("success"))
         elif active_pct >= 70:
@@ -398,7 +379,7 @@ class DeviceFleetTab(QWidget):
         self._table.setItem(row, _COL_ACTIVE_PCT, item)
 
         # --- Avg Health ---
-        item = _SortableItem(f"{avg_health:.1f}", avg_health)
+        item = SortableItem(f"{avg_health:.1f}", avg_health)
         if avg_health >= 70:
             item.setForeground(sc("success"))
         elif avg_health >= 40:
@@ -408,15 +389,15 @@ class DeviceFleetTab(QWidget):
         self._table.setItem(row, _COL_AVG_HEALTH, item)
 
         # --- Avg FBR ---
-        item = _SortableItem(f"{avg_fbr:.1f}" if fbr_values else "", avg_fbr)
+        item = SortableItem(f"{avg_fbr:.1f}" if fbr_values else "", avg_fbr)
         self._table.setItem(row, _COL_AVG_FBR, item)
 
         # --- Avg Sources ---
-        item = _SortableItem(f"{avg_sources:.1f}", avg_sources)
+        item = SortableItem(f"{avg_sources:.1f}", avg_sources)
         self._table.setItem(row, _COL_SOURCES, item)
 
         # --- Review ---
-        item = _SortableItem(str(review_count) if review_count else "", review_count)
+        item = SortableItem(str(review_count) if review_count else "", review_count)
         if review_count > 0:
             item.setForeground(sc("warning"))
         self._table.setItem(row, _COL_REVIEW, item)
@@ -425,7 +406,7 @@ class DeviceFleetTab(QWidget):
         sync_str = dev.last_synced_at or ""
         # Show only date+time portion if ISO format
         display_sync = sync_str[:19].replace("T", " ") if sync_str else ""
-        item = _SortableItem(display_sync, sync_str)
+        item = SortableItem(display_sync, sync_str)
         self._table.setItem(row, _COL_LAST_SYNC, item)
 
     # ------------------------------------------------------------------
@@ -511,23 +492,23 @@ class DeviceFleetTab(QWidget):
                 op_tags=self._op_tags_map.get(acc.id, ""),
             )
             color_key = self._health_service.score_color_key(score)
-            item = _SortableItem(f"{score:.1f}", score)
+            item = SortableItem(f"{score:.1f}", score)
             item.setForeground(sc(color_key))
         else:
-            item = _SortableItem("", 0.0)
+            item = SortableItem("", 0.0)
         self._detail_table.setItem(row, _DET_HEALTH, item)
 
         # Active Sources
         src_count = self._source_count_map.get(acc.id, 0) if acc.id else 0
-        item = _SortableItem(str(src_count), src_count)
+        item = SortableItem(str(src_count), src_count)
         self._detail_table.setItem(row, _DET_SOURCES, item)
 
         # Best FBR%
         fbr = self._fbr_map.get(acc.id) if acc.id else None
         if fbr is not None and fbr.best_fbr_pct is not None:
-            item = _SortableItem(f"{fbr.best_fbr_pct:.1f}", fbr.best_fbr_pct)
+            item = SortableItem(f"{fbr.best_fbr_pct:.1f}", fbr.best_fbr_pct)
         else:
-            item = _SortableItem("", 0.0)
+            item = SortableItem("", 0.0)
         self._detail_table.setItem(row, _DET_FBR, item)
 
         # Tags

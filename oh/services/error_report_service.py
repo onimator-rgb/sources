@@ -14,7 +14,6 @@ import traceback as tb_module
 import urllib.request
 import urllib.error
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Type
 from types import TracebackType
@@ -26,16 +25,13 @@ from oh.models.error_report import (
 )
 from oh.repositories.error_report_repo import ErrorReportRepository
 from oh.repositories.settings_repo import SettingsRepository
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
 _MAX_LOG_LINES = 100
 _MAX_TRACEBACK_LEN = 3000
 _SEND_TIMEOUT = 10  # seconds
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class ErrorReportService:
@@ -155,7 +151,7 @@ class ErrorReportService:
             db_stats=json.dumps(ctx["db_stats"]),
             log_tail=ctx["log_tail"],
             user_note=user_note,
-            created_at=_utcnow(),
+            created_at=utcnow(),
         )
 
     def _collect_context(self) -> dict:

@@ -6,19 +6,14 @@ Records a complete sync run with per-account event history.
 """
 import json
 import logging
-from datetime import datetime, timezone
-
 from oh.models.account import AccountRecord, DiscoveredAccount, DeviceRecord
 from oh.models.sync import SyncRun, SyncSummary
 from oh.repositories.account_repo import AccountRepository
 from oh.repositories.device_repo import DeviceRepository
 from oh.repositories.sync_repo import SyncRepository
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class SyncModule:
@@ -90,7 +85,7 @@ class SyncModule:
     def _process(
         self, sync_run: SyncRun, summary: SyncSummary, discovered: list
     ) -> None:
-        now = _utcnow()
+        now = utcnow()
 
         # --- Upsert devices seen in this scan ---
         # Build a map to avoid O(n) scan per unique device_id

@@ -17,6 +17,7 @@ from PySide6.QtGui import QColor, QFont
 
 from oh.models.source_profile import SourceProfile, SourceFBRStats
 from oh.repositories.source_profile_repo import SourceProfileRepository
+from oh.ui.table_utils import SortableItem
 
 logger = logging.getLogger(__name__)
 
@@ -48,26 +49,6 @@ _HEADERS = [
 _C_GREEN = QColor("#4caf7d")
 _C_RED   = QColor("#e05252")
 _C_MUTED = QColor("#888888")
-
-
-# ---------------------------------------------------------------------------
-# Sortable table item
-# ---------------------------------------------------------------------------
-
-class _SortableItem(QTableWidgetItem):
-    """QTableWidgetItem sorted by an explicit key rather than display text."""
-
-    def __init__(self, display_text: str, sort_key) -> None:
-        super().__init__(display_text)
-        self._sort_key = sort_key
-
-    def __lt__(self, other: QTableWidgetItem) -> bool:
-        if isinstance(other, _SortableItem):
-            try:
-                return self._sort_key < other._sort_key
-            except TypeError:
-                return str(self._sort_key) < str(other._sort_key)
-        return self.text() < other.text()
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +255,7 @@ class SourceProfilesTab(QWidget):
 
         # Confidence
         conf = p.niche_confidence or 0.0
-        item = _SortableItem(f"{conf * 100:.0f}%" if conf else "", conf)
+        item = SortableItem(f"{conf * 100:.0f}%" if conf else "", conf)
         if conf >= 0.7:
             item.setForeground(_C_GREEN)
         elif conf < 0.4 and conf > 0:
@@ -293,7 +274,7 @@ class SourceProfilesTab(QWidget):
 
         # Followers
         fc = p.follower_count or 0
-        item = _SortableItem(f"{fc:,}" if fc else "", fc)
+        item = SortableItem(f"{fc:,}" if fc else "", fc)
         if fc >= 10000:
             font = item.font()
             font.setBold(True)
@@ -307,11 +288,11 @@ class SourceProfilesTab(QWidget):
         quality = stats.quality_account_count if stats else 0
 
         # Accounts
-        item = _SortableItem(str(accs) if accs else "", accs)
+        item = SortableItem(str(accs) if accs else "", accs)
         self._table.setItem(row, _COL_ACCOUNTS, item)
 
         # Avg FBR
-        item = _SortableItem(f"{avg_fbr:.1f}" if accs else "", avg_fbr)
+        item = SortableItem(f"{avg_fbr:.1f}" if accs else "", avg_fbr)
         if accs > 0:
             if avg_fbr >= 10.0:
                 item.setForeground(_C_GREEN)
@@ -320,7 +301,7 @@ class SourceProfilesTab(QWidget):
         self._table.setItem(row, _COL_AVG_FBR, item)
 
         # Weighted FBR
-        item = _SortableItem(f"{wfbr:.1f}" if accs else "", wfbr)
+        item = SortableItem(f"{wfbr:.1f}" if accs else "", wfbr)
         if accs > 0:
             if wfbr >= 10.0:
                 item.setForeground(_C_GREEN)
@@ -329,7 +310,7 @@ class SourceProfilesTab(QWidget):
         self._table.setItem(row, _COL_WFBR, item)
 
         # Quality
-        item = _SortableItem(str(quality) if accs else "", quality)
+        item = SortableItem(str(quality) if accs else "", quality)
         self._table.setItem(row, _COL_QUALITY, item)
 
         # Status

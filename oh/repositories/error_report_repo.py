@@ -7,16 +7,12 @@ retried on next startup.
 """
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from oh.models.error_report import ErrorReport
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class ErrorReportRepository:
@@ -49,7 +45,7 @@ class ErrorReportRepository:
                 report.log_tail,
                 report.user_note,
                 report.sent_at,
-                report.created_at or _utcnow(),
+                report.created_at or utcnow(),
             ),
         )
         report.id = cursor.lastrowid
@@ -60,7 +56,7 @@ class ErrorReportRepository:
         """Mark a report as successfully sent."""
         self._conn.execute(
             "UPDATE error_reports SET sent_at = ? WHERE report_id = ?",
-            (_utcnow(), report_id),
+            (utcnow(), report_id),
         )
         self._conn.commit()
 

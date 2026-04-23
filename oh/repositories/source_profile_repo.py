@@ -9,16 +9,12 @@ source_fbr_stats stores aggregated FBR performance across all accounts.
 import json
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from oh.models.source_profile import SourceProfile, SourceFBRStats
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class SourceProfileRepository:
@@ -49,7 +45,7 @@ class SourceProfileRepository:
         (COALESCE keeps the old value when the new one is NULL).
         updated_at is always refreshed.
         """
-        now = _utcnow()
+        now = utcnow()
         self._conn.execute(
             """
             INSERT INTO source_profiles
@@ -130,7 +126,7 @@ class SourceProfileRepository:
 
         Returns the number of rows upserted.
         """
-        now = _utcnow()
+        now = utcnow()
         cursor = self._conn.execute(
             """
             INSERT OR REPLACE INTO source_fbr_stats

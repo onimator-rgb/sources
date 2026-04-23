@@ -7,16 +7,12 @@ re-scanning the same day always reflects the latest data.
 """
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from oh.models.session import AccountSessionRecord
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class SessionRepository:
@@ -65,7 +61,7 @@ class SessionRepository:
                 record.follow_limit,
                 record.like_limit,
                 1 if record.has_activity else 0,
-                record.collected_at or _utcnow(),
+                record.collected_at or utcnow(),
             ),
         )
         self._conn.commit()

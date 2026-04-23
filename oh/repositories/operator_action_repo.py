@@ -6,15 +6,10 @@ is logged here.  The table is append-only; rows are never modified.
 """
 import sqlite3
 import logging
-from datetime import datetime, timezone
-
 from oh.models.operator_action import OperatorActionRecord
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class OperatorActionRepository:
@@ -43,7 +38,7 @@ class OperatorActionRepository:
                 record.old_value,
                 record.new_value,
                 record.note,
-                record.performed_at or _utcnow(),
+                record.performed_at or utcnow(),
                 record.machine,
             ),
         )

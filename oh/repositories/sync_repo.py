@@ -1,16 +1,12 @@
 """CRUD access to sync_runs and sync_events tables."""
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from oh.models.sync import SyncRun, SyncSummary
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class SyncRepository:
@@ -18,7 +14,7 @@ class SyncRepository:
         self._conn = conn
 
     def create_run(self, triggered_by: str = "manual") -> SyncRun:
-        now = _utcnow()
+        now = utcnow()
         cursor = self._conn.execute(
             "INSERT INTO sync_runs (started_at, status, triggered_by) VALUES (?, 'running', ?)",
             (now, triggered_by),
@@ -37,7 +33,7 @@ class SyncRepository:
             WHERE id=?
             """,
             (
-                _utcnow(),
+                utcnow(),
                 summary.devices_scanned, summary.accounts_scanned,
                 summary.accounts_added, summary.accounts_removed,
                 summary.accounts_updated, summary.accounts_unchanged,
@@ -49,7 +45,7 @@ class SyncRepository:
     def fail_run(self, run_id: int, error_message: str) -> None:
         self._conn.execute(
             "UPDATE sync_runs SET status='failed', completed_at=?, error_message=? WHERE id=?",
-            (_utcnow(), error_message, run_id),
+            (utcnow(), error_message, run_id),
         )
         self._conn.commit()
 
@@ -70,7 +66,7 @@ class SyncRepository:
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (sync_run_id, event_type, device_id, username,
-             account_id, changed_fields, _utcnow()),
+             account_id, changed_fields, utcnow()),
         )
         self._conn.commit()
 
@@ -95,7 +91,7 @@ class SyncRepository:
                 error_message='Recovered: process was interrupted before completion'
             WHERE status='running'
             """,
-            (_utcnow(),),
+            (utcnow(),),
         )
         self._conn.commit()
         return cursor.rowcount

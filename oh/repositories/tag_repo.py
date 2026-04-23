@@ -12,7 +12,6 @@ per source per account.  Bot tags and operator tags live side by side.
 """
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from oh.models.session import (
@@ -20,12 +19,9 @@ from oh.models.session import (
     TAG_SOURCE_BOT,
     TAG_SOURCE_OPERATOR,
 )
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class TagRepository:
@@ -49,7 +45,7 @@ class TagRepository:
         )
 
         if tags:
-            now = _utcnow()
+            now = utcnow()
             self._conn.executemany(
                 """
                 INSERT INTO account_tags
@@ -84,7 +80,7 @@ class TagRepository:
         level: Optional[int] = None,
     ) -> None:
         """Insert or update a single operator tag for an account."""
-        now = _utcnow()
+        now = utcnow()
         self._conn.execute(
             """
             INSERT INTO account_tags

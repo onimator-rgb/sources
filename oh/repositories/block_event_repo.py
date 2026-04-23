@@ -7,16 +7,12 @@ shadow bans, etc.) per account with evidence and resolution status.
 import sqlite3
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from oh.models.block_event import BlockEvent
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class BlockEventRepository:
@@ -39,7 +35,7 @@ class BlockEventRepository:
             (
                 event.account_id,
                 event.event_type,
-                event.detected_at or _utcnow(),
+                event.detected_at or utcnow(),
                 event.evidence,
                 event.resolved_at,
                 1 if event.auto_detected else 0,
@@ -53,7 +49,7 @@ class BlockEventRepository:
         """Mark a block event as resolved."""
         self._conn.execute(
             "UPDATE block_events SET resolved_at = ? WHERE id = ?",
-            (_utcnow(), event_id),
+            (utcnow(), event_id),
         )
         self._conn.commit()
 

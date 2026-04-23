@@ -1,16 +1,12 @@
 """CRUD for warmup_templates table."""
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from oh.models.warmup_template import WarmupTemplate
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class WarmupTemplateRepository:
@@ -18,7 +14,7 @@ class WarmupTemplateRepository:
         self._conn = conn
 
     def create(self, template: WarmupTemplate) -> WarmupTemplate:
-        now = _utcnow()
+        now = utcnow()
         cursor = self._conn.execute(
             """INSERT INTO warmup_templates
                (name, description, follow_start, follow_increment, follow_cap,
@@ -50,7 +46,7 @@ class WarmupTemplateRepository:
              template.like_start, template.like_increment, template.like_cap,
              int(template.auto_increment), int(template.enable_follow),
              int(template.enable_like), int(template.is_default),
-             _utcnow(), template.id),
+             utcnow(), template.id),
         )
         self._conn.commit()
 

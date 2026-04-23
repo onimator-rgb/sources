@@ -7,16 +7,12 @@ category.  Membership is many-to-many.
 import sqlite3
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from oh.models.account_group import AccountGroup, GroupMembership
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class AccountGroupRepository:
@@ -34,7 +30,7 @@ class AccountGroupRepository:
         description: Optional[str] = None,
     ) -> AccountGroup:
         """Create a new group. Returns the group with id set."""
-        now = _utcnow()
+        now = utcnow()
         cursor = self._conn.execute(
             """
             INSERT INTO account_groups (name, color, description, created_at, updated_at)
@@ -66,7 +62,7 @@ class AccountGroupRepository:
             SET name = ?, color = ?, description = ?, updated_at = ?
             WHERE id = ?
             """,
-            (name, color, description, _utcnow(), group_id),
+            (name, color, description, utcnow(), group_id),
         )
         self._conn.commit()
 
@@ -110,7 +106,7 @@ class AccountGroupRepository:
 
     def add_members(self, group_id: int, account_ids: List[int]) -> int:
         """Add accounts to a group. Returns count added (skips duplicates)."""
-        now = _utcnow()
+        now = utcnow()
         added = 0
         for aid in account_ids:
             try:

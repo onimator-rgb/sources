@@ -79,6 +79,7 @@ from oh.services.global_like_sources_service import GlobalLikeSourcesService
 from oh.services.lbr_service import LBRService
 from oh.services.settings_copier_service import SettingsCopierService
 from oh.services.warmup_template_service import WarmupTemplateService
+from oh.ui.table_utils import SortableItem
 
 logger = logging.getLogger(__name__)
 
@@ -143,25 +144,6 @@ def C_LOW_FBR():  return sc("muted")
 def C_ERROR():    return sc("error")
 def C_NEVER():    return sc("warning")
 
-
-# ---------------------------------------------------------------------------
-# Sortable item — numeric/date sort for FBR columns
-# ---------------------------------------------------------------------------
-
-class _SortableItem(QTableWidgetItem):
-    """QTableWidgetItem whose sort order is driven by an explicit sort key."""
-
-    def __init__(self, display_text: str, sort_key) -> None:
-        super().__init__(display_text)
-        self._sort_key = sort_key
-
-    def __lt__(self, other: "QTableWidgetItem") -> bool:
-        if isinstance(other, _SortableItem):
-            try:
-                return self._sort_key < other._sort_key
-            except TypeError:
-                return str(self._sort_key) < str(other._sort_key)
-        return self.text() < other.text()
 
 
 # ---------------------------------------------------------------------------
@@ -1920,7 +1902,7 @@ class MainWindow(QMainWindow):
         # Timeslot column (1-4)
         slot_num = self._get_slot_number(acc)
         slot_text = str(slot_num) if slot_num > 0 else "\u2014"
-        slot_item = _SortableItem(slot_text, slot_num)
+        slot_item = SortableItem(slot_text, slot_num)
         slot_item.setTextAlignment(center)
         if removed:
             slot_item.setForeground(C_REMOVED())
@@ -1974,7 +1956,7 @@ class MainWindow(QMainWindow):
             ft_color = C_NO()
         elif follow_today > 0:
             ft_color = C_YES()
-        ft_item = _SortableItem(str(follow_today) if sess else "—", follow_today if sess else -1)
+        ft_item = SortableItem(str(follow_today) if sess else "—", follow_today if sess else -1)
         ft_item.setTextAlignment(center)
         if removed:
             ft_item.setForeground(C_REMOVED())
@@ -1985,7 +1967,7 @@ class MainWindow(QMainWindow):
         # Like Today — neutral rendering (no red for 0 — we can't distinguish
         # accounts without like flow enabled from those that failed)
         lt_color = C_YES() if like_today > 0 else None
-        lt_item = _SortableItem(str(like_today) if sess else "—", like_today if sess else -1)
+        lt_item = SortableItem(str(like_today) if sess else "—", like_today if sess else -1)
         lt_item.setTextAlignment(center)
         if removed:
             lt_item.setForeground(C_REMOVED())
@@ -2020,7 +2002,7 @@ class MainWindow(QMainWindow):
                 src_color = C_WARN()
             else:
                 src_color = None
-            src_item = _SortableItem(str(src_count), src_count)
+            src_item = SortableItem(str(src_count), src_count)
             src_item.setTextAlignment(center)
             if src_color:
                 src_item.setForeground(src_color)
@@ -2054,7 +2036,7 @@ class MainWindow(QMainWindow):
         health = AccountHealthService.compute_score(
             acc, snap, sess, src_count_h, op_tags_h or "", min_src_th,
         )
-        health_item = _SortableItem(f"{health:.0f}", health)
+        health_item = SortableItem(f"{health:.0f}", health)
         health_item.setTextAlignment(center)
         if removed:
             health_item.setForeground(C_REMOVED())
@@ -2170,8 +2152,8 @@ class MainWindow(QMainWindow):
         """
         center = Qt.AlignmentFlag.AlignCenter
 
-        def _si(text: str, sort_key, color=None, _dimmed=False) -> _SortableItem:
-            item = _SortableItem(text, sort_key)
+        def _si(text: str, sort_key, color=None, _dimmed=False) -> SortableItem:
+            item = SortableItem(text, sort_key)
             item.setTextAlignment(center)
             if _dimmed:
                 item.setForeground(C_REMOVED())

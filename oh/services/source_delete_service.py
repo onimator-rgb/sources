@@ -23,8 +23,6 @@ SAFETY:
 """
 import logging
 import socket
-from datetime import datetime, timezone
-
 from typing import Optional
 
 from oh.models.delete_history import DeleteAction, DeleteItem, SourceDeleteResult
@@ -37,12 +35,9 @@ from oh.repositories.fbr_snapshot_repo import FBRSnapshotRepository
 from oh.repositories.settings_repo import SettingsRepository
 from oh.repositories.source_assignment_repo import SourceAssignmentRepository
 from oh.services.global_sources_service import GlobalSourcesService
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class SourceDeleteService:
@@ -145,7 +140,7 @@ class SourceDeleteService:
         item.affected_details = affected_details
 
         action = DeleteAction(
-            deleted_at=_utcnow(),
+            deleted_at=utcnow(),
             delete_type="single",
             scope="global",
             total_sources=1,
@@ -182,7 +177,7 @@ class SourceDeleteService:
 
         if not sources_to_delete:
             action = DeleteAction(
-                deleted_at=_utcnow(),
+                deleted_at=utcnow(),
                 delete_type="bulk",
                 scope="global",
                 total_sources=0,
@@ -234,7 +229,7 @@ class SourceDeleteService:
             items.append(item)
 
         action = DeleteAction(
-            deleted_at=_utcnow(),
+            deleted_at=utcnow(),
             delete_type="bulk",
             scope="global",
             total_sources=len(sources_to_delete),
@@ -303,7 +298,7 @@ class SourceDeleteService:
         )
 
         action = DeleteAction(
-            deleted_at=_utcnow(),
+            deleted_at=utcnow(),
             delete_type="single",
             scope="account",
             total_sources=1,
@@ -420,7 +415,7 @@ class SourceDeleteService:
             ))
 
         action = DeleteAction(
-            deleted_at=_utcnow(),
+            deleted_at=utcnow(),
             delete_type="bulk",
             scope="account",
             total_sources=len(source_names),
@@ -537,7 +532,7 @@ class SourceDeleteService:
 
         # Save the revert action
         revert_action = DeleteAction(
-            deleted_at=_utcnow(),
+            deleted_at=utcnow(),
             delete_type="revert",
             scope=action.scope,
             total_sources=len(revert_items),

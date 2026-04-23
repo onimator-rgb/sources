@@ -12,12 +12,9 @@ from oh.models.bulk_discovery import (
     BulkDiscoveryRun,
     BULK_FAILED,
 )
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class BulkDiscoveryRepository:
@@ -36,7 +33,7 @@ class BulkDiscoveryRepository:
         machine: Optional[str] = None,
     ) -> BulkDiscoveryRun:
         """Create a new bulk discovery run and return it with id set."""
-        now = _utcnow()
+        now = utcnow()
         cursor = self._conn.execute(
             """
             INSERT INTO bulk_discovery_runs
@@ -88,7 +85,7 @@ class BulkDiscoveryRepository:
             SET status=?, completed_at=?, error_message=?
             WHERE id=?
             """,
-            (status, _utcnow(), error_message, run_id),
+            (status, utcnow(), error_message, run_id),
         )
         self._conn.commit()
 
@@ -100,7 +97,7 @@ class BulkDiscoveryRepository:
             SET reverted_at=?, revert_status=?
             WHERE id=?
             """,
-            (_utcnow(), revert_status, run_id),
+            (utcnow(), revert_status, run_id),
         )
         self._conn.commit()
 
@@ -113,7 +110,7 @@ class BulkDiscoveryRepository:
             SET status=?, completed_at=?, error_message='Stale run recovered'
             WHERE status='running' AND started_at < ?
             """,
-            (BULK_FAILED, _utcnow(), cutoff.isoformat()),
+            (BULK_FAILED, utcnow(), cutoff.isoformat()),
         )
         self._conn.commit()
         count = cursor.rowcount

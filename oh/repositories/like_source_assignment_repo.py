@@ -18,16 +18,12 @@ from __future__ import annotations
 
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from oh.models.global_like_source import GlobalLikeSourceRecord, LikeSourceAccountDetail
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class LikeSourceAssignmentRepository:
@@ -54,7 +50,7 @@ class LikeSourceAssignmentRepository:
         A source present in both sets is treated as active.
         Empty or whitespace-only names are silently skipped.
         """
-        now = _utcnow()
+        now = utcnow()
 
         rows = [
             (account_id, name.strip(), 1, snapshot_id, now)
@@ -93,7 +89,7 @@ class LikeSourceAssignmentRepository:
         """
         if not active_names:
             # No active names → deactivate everything for this account
-            now = _utcnow()
+            now = utcnow()
             self._conn.execute(
                 """
                 UPDATE like_source_assignments
@@ -105,7 +101,7 @@ class LikeSourceAssignmentRepository:
             self._conn.commit()
             return
 
-        now = _utcnow()
+        now = utcnow()
         # Build a set of lowercase trimmed names for comparison
         lower_active = {n.strip().lower() for n in active_names if n.strip()}
 
@@ -396,7 +392,7 @@ class LikeSourceAssignmentRepository:
                   SELECT id FROM oh_accounts WHERE removed_at IS NOT NULL
               )
             """,
-            (_utcnow(),),
+            (utcnow(),),
         )
         self._conn.commit()
         count = cursor.rowcount

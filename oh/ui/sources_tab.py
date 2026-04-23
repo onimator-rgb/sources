@@ -30,6 +30,7 @@ from oh.ui.delete_confirm_dialog import DeleteConfirmDialog
 from oh.ui.delete_history_dialog import DeleteHistoryDialog
 from oh.ui.target_splitter_dialog import TargetSplitterDialog
 from oh.ui.style import sc, BTN_HEIGHT_MD
+from oh.ui.table_utils import SortableItem
 from oh.ui.workers import WorkerThread
 
 logger = logging.getLogger(__name__)
@@ -93,24 +94,6 @@ _FILT_NO_DATA   = "No FBR data"     # total_follows == 0
 _FILT_ACTIVE    = "Active only"      # active_accounts > 0
 
 
-# ---------------------------------------------------------------------------
-# Shared sortable item
-# ---------------------------------------------------------------------------
-
-class _SortableItem(QTableWidgetItem):
-    """QTableWidgetItem sorted by an explicit key rather than display text."""
-
-    def __init__(self, display_text: str, sort_key) -> None:
-        super().__init__(display_text)
-        self._sort_key = sort_key
-
-    def __lt__(self, other: QTableWidgetItem) -> bool:
-        if isinstance(other, _SortableItem):
-            try:
-                return self._sort_key < other._sort_key
-            except TypeError:
-                return str(self._sort_key) < str(other._sort_key)
-        return self.text() < other.text()
 
 
 # ---------------------------------------------------------------------------
@@ -517,8 +500,8 @@ class SourcesTab(QWidget):
             except Exception:
                 logger.debug("Could not load source trends", exc_info=True)
 
-        def _si(text: str, key, color: Optional[QColor] = None) -> _SortableItem:
-            item = _SortableItem(text, key)
+        def _si(text: str, key, color: Optional[QColor] = None) -> SortableItem:
+            item = SortableItem(text, key)
             item.setTextAlignment(center)
             if color:
                 item.setForeground(color)
@@ -529,7 +512,7 @@ class SourcesTab(QWidget):
             self._sources_table.insertRow(r)
 
             # Source name — left-aligned, carries the name for detail lookup
-            name_item = _SortableItem(src.source_name, src.source_name.lower())
+            name_item = SortableItem(src.source_name, src.source_name.lower())
             name_item.setData(Qt.ItemDataRole.UserRole, src.source_name)
             self._sources_table.setItem(r, _COL_SOURCE, name_item)
 
@@ -674,8 +657,8 @@ class SourcesTab(QWidget):
         center = Qt.AlignmentFlag.AlignCenter
         right  = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 
-        def _si(text: str, key, color: Optional[QColor] = None) -> _SortableItem:
-            item = _SortableItem(text, key)
+        def _si(text: str, key, color: Optional[QColor] = None) -> SortableItem:
+            item = SortableItem(text, key)
             item.setTextAlignment(center)
             if color:
                 item.setForeground(color)
@@ -742,17 +725,17 @@ class SourcesTab(QWidget):
             # Used — COUNT(*) from sources/{source_name}.db for this account
             urec = usage_recs.get(acc.account_id)
             if urec is not None and urec.has_data:
-                used_item = _SortableItem(f"{urec.used_count:,}", urec.used_count)
+                used_item = SortableItem(f"{urec.used_count:,}", urec.used_count)
                 used_item.setTextAlignment(right)
             else:
-                used_item = _SortableItem("—", -1)
+                used_item = SortableItem("—", -1)
                 used_item.setTextAlignment(center)
                 used_item.setForeground(_c_dim())
             self._detail_table.setItem(r, _D_USED, used_item)
 
             # Used % — derived from .stm percent file + follows
             if urec is not None and urec.used_pct is not None:
-                pct_item = _SortableItem(f"{urec.used_pct:.1f}%", urec.used_pct)
+                pct_item = SortableItem(f"{urec.used_pct:.1f}%", urec.used_pct)
                 pct_item.setTextAlignment(right)
                 if urec.total_followers_derived is not None:
                     pct_item.setToolTip(
@@ -760,7 +743,7 @@ class SourcesTab(QWidget):
                         f"{urec.total_followers_derived:,} total followers"
                     )
             else:
-                pct_item = _SortableItem("—", -1.0)
+                pct_item = SortableItem("—", -1.0)
                 pct_item.setTextAlignment(center)
                 pct_item.setForeground(_c_dim())
             self._detail_table.setItem(r, _D_USED_PCT, pct_item)

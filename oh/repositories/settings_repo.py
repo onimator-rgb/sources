@@ -5,9 +5,10 @@ New settings are added via seed_defaults() — zero schema changes required.
 import socket
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +40,13 @@ _CONFIG_DEFAULTS = [
 ]
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 class SettingsRepository:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
     def seed_defaults(self) -> None:
         """Insert default config rows; skip any key that already exists."""
-        now = _utcnow()
+        now = utcnow()
         for key, value, description in _CONFIG_DEFAULTS:
             self._conn.execute(
                 "INSERT OR IGNORE INTO oh_config (key, value, updated_at, description) "
@@ -77,7 +74,7 @@ class SettingsRepository:
         self._conn.execute(
             "INSERT INTO oh_config (key, value, updated_at, description) VALUES (?, ?, ?, '') "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-            (key, value, _utcnow()),
+            (key, value, utcnow()),
         )
         self._conn.commit()
 

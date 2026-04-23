@@ -14,16 +14,12 @@ Source names are stored stripped of leading/trailing whitespace.
 """
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from oh.models.global_source import GlobalSourceRecord, SourceAccountDetail
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class SourceAssignmentRepository:
@@ -50,7 +46,7 @@ class SourceAssignmentRepository:
         A source present in both sets is treated as active.
         Empty or whitespace-only names are silently skipped.
         """
-        now = _utcnow()
+        now = utcnow()
 
         rows = [
             (account_id, name.strip(), 1, snapshot_id, now)
@@ -282,7 +278,7 @@ class SourceAssignmentRepository:
         Called after SourceDeleter successfully removes the source from sources.txt.
         Does nothing if the row does not exist.
         """
-        now = _utcnow()
+        now = utcnow()
         self._conn.execute(
             """
             UPDATE source_assignments
@@ -300,7 +296,7 @@ class SourceAssignmentRepository:
         Called after SourceRestorer successfully adds the source back to sources.txt.
         Creates the row if it does not exist.
         """
-        now = _utcnow()
+        now = utcnow()
         self._conn.execute(
             """
             INSERT INTO source_assignments (account_id, source_name, is_active, updated_at, created_at)
@@ -363,7 +359,7 @@ class SourceAssignmentRepository:
                   SELECT id FROM oh_accounts WHERE removed_at IS NOT NULL
               )
             """,
-            (_utcnow(),),
+            (utcnow(),),
         )
         self._conn.commit()
         count = cursor.rowcount

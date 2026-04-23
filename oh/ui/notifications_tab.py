@@ -20,6 +20,7 @@ from PySide6.QtGui import QAction
 from oh.models.notification import NOTIFICATION_TYPES, NotificationRecord
 from oh.services.notification_service import NotificationService
 from oh.ui.style import sc, BTN_HEIGHT_LG
+from oh.ui.table_utils import SortableItem
 from oh.ui.workers import WorkerThread
 
 logger = logging.getLogger(__name__)
@@ -35,26 +36,6 @@ _COL_DATE         = 3
 _COL_TIME         = 4
 
 _HEADERS = ["Device", "Account", "Notification", "Date", "Time"]
-
-
-# ---------------------------------------------------------------------------
-# Sortable table item
-# ---------------------------------------------------------------------------
-
-class _SortableItem(QTableWidgetItem):
-    """QTableWidgetItem sorted by an explicit key rather than display text."""
-
-    def __init__(self, display_text: str, sort_key) -> None:
-        super().__init__(display_text)
-        self._sort_key = sort_key
-
-    def __lt__(self, other: QTableWidgetItem) -> bool:
-        if isinstance(other, _SortableItem):
-            try:
-                return self._sort_key < other._sort_key
-            except TypeError:
-                return str(self._sort_key) < str(other._sort_key)
-        return self.text() < other.text()
 
 
 # ---------------------------------------------------------------------------
@@ -366,11 +347,11 @@ class NotificationsTab(QWidget):
         self._table.setItem(row, _COL_NOTIFICATION, item)
 
         # Date
-        item = _SortableItem(rec.date or "", rec.date or "")
+        item = SortableItem(rec.date or "", rec.date or "")
         self._table.setItem(row, _COL_DATE, item)
 
         # Time
-        item = _SortableItem(rec.time or "", rec.time or "")
+        item = SortableItem(rec.time or "", rec.time or "")
         self._table.setItem(row, _COL_TIME, item)
 
     # ------------------------------------------------------------------

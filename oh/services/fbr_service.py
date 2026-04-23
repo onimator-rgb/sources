@@ -12,7 +12,6 @@ UI layers call this service; they do not call FBRCalculator or the repo directly
 """
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from oh.models.fbr import FBRAnalysisResult
@@ -26,12 +25,9 @@ from oh.repositories.account_repo import AccountRepository
 from oh.repositories.fbr_snapshot_repo import FBRSnapshotRepository
 from oh.repositories.settings_repo import SettingsRepository
 from oh.repositories.source_assignment_repo import SourceAssignmentRepository
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class FBRService:
@@ -205,7 +201,7 @@ class FBRService:
                 account_id=account_id,
                 device_id=result.device_id,
                 username=result.username,
-                analyzed_at=_utcnow(),
+                analyzed_at=utcnow(),
                 min_follows=result.min_follows,
                 min_fbr_pct=result.min_fbr_pct,
                 total_sources=0,
@@ -219,7 +215,7 @@ class FBRService:
                 account_id=account_id,
                 device_id=result.device_id,
                 username=result.username,
-                analyzed_at=_utcnow(),
+                analyzed_at=utcnow(),
                 min_follows=result.min_follows,
                 min_fbr_pct=result.min_fbr_pct,
                 total_sources=0,
@@ -235,7 +231,7 @@ class FBRService:
             account_id=account_id,
             device_id=result.device_id,
             username=result.username,
-            analyzed_at=_utcnow(),
+            analyzed_at=utcnow(),
             min_follows=result.min_follows,
             min_fbr_pct=result.min_fbr_pct,
             total_sources=result.total_count,

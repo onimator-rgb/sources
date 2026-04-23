@@ -7,16 +7,12 @@ reports success to the operator.
 import json
 import sqlite3
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from oh.models.delete_history import DeleteAction, DeleteItem
+from oh.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class DeleteHistoryRepository:
@@ -46,7 +42,7 @@ class DeleteHistoryRepository:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                action.deleted_at or _utcnow(),
+                action.deleted_at or utcnow(),
                 action.delete_type,
                 action.scope,
                 action.total_sources,
@@ -156,7 +152,7 @@ class DeleteHistoryRepository:
             SET status = 'reverted', reverted_at = ?
             WHERE id = ?
             """,
-            (_utcnow(), action_id),
+            (utcnow(), action_id),
         )
         self._conn.commit()
 
