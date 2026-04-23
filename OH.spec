@@ -36,10 +36,17 @@ _icon_arg = [str(_ico)] if _ico.exists() else []
 
 block_cipher = None
 
+_python_dir = Path(sys.executable).parent
+_vc_binaries = []
+for _dll in ("vcruntime140.dll", "vcruntime140_1.dll"):
+    _p = _python_dir / _dll
+    if _p.exists():
+        _vc_binaries.append((str(_p), "."))
+
 a = Analysis(
     [str(ROOT / "main.py")],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=_vc_binaries,
     datas=[
         # Bundle the entire assets folder so asset_path() works when frozen
         (str(ROOT / "oh" / "assets"), "oh/assets"),
