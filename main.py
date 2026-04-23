@@ -143,6 +143,98 @@ def _install_exception_hook(error_report_service=None) -> None:
 
 logger = logging.getLogger(__name__)
 
+_UPDATE_URL = "https://raw.githubusercontent.com/onimator-rgb/oh-releases/main/update.json"
+
+
+# ---------------------------------------------------------------------------
+# Pre-launch update check (replaces START.bat)
+# ---------------------------------------------------------------------------
+
+def _pre_launch_update_check(app: "QApplication") -> None:
+    """Check for updates before showing the main window.
+
+    If a newer version is available, show a small progress dialog,
+    download the update, swap the exe, and restart.
+    Only runs in frozen (.exe) mode.
+    """
+    if not getattr(sys, 'frozen', False):
+        return
+
+    try:
+        from oh.services.update_service import UpdateService
+        svc = UpdateService(_UPDATE_URL)
+        info = svc.check_for_update()
+        if info is None:
+            logger.info("Pre-launch update check: up to date (%s)", svc.current_version)
+            _write_version_file(svc.current_version)
+            return
+
+        logger.info("Pre-launch update: %s -> %s", svc.current_version, info.version)
+    except Exception as exc:
+        logger.debug("Pre-launch update check failed: %s", exc)
+        return
+
+    # Show a minimal progress dialog
+    from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QProgressBar
+    from PySide6.QtCore import Qt
+
+    dlg = QDialog()
+    dlg.setWindowTitle("OH — Updating")
+    dlg.setFixedSize(400, 120)
+    dlg.setWindowFlags(
+        Qt.WindowType.Dialog
+        | Qt.WindowType.CustomizeWindowHint
+        | Qt.WindowType.WindowTitleHint
+    )
+    lo = QVBoxLayout(dlg)
+    lo.addWidget(QLabel(f"Updating OH: v{svc.current_version} → v{info.version}"))
+    lo.addWidget(QLabel("Downloading, please wait..."))
+    progress = QProgressBar()
+    progress.setRange(0, 100)
+    lo.addWidget(progress)
+    dlg.show()
+    app.processEvents()
+
+    def on_progress(downloaded: int, total: int) -> None:
+        if total > 0:
+            progress.setValue(int(downloaded * 100 / total))
+            app.processEvents()
+
+    path = svc.download_update(
+        info.download_url,
+        progress_callback=on_progress,
+        expected_sha256=info.sha256,
+    )
+
+    if not path:
+        logger.warning("Pre-launch update download failed")
+        dlg.close()
+        return
+
+    # Update .oh_version for backward compatibility
+    _write_version_file(info.version)
+
+    # Apply update: generate updater batch, launch it, exit
+    if svc.apply_update(path):
+        logger.info("Pre-launch update applied, restarting...")
+        dlg.close()
+        app.quit()
+        sys.exit(0)
+    else:
+        logger.error("Pre-launch update apply failed")
+        dlg.close()
+
+
+def _write_version_file(version: str) -> None:
+    """Write .oh_version next to the exe for backward compat with START.bat."""
+    if not getattr(sys, 'frozen', False):
+        return
+    try:
+        ver_path = Path(sys.executable).parent / ".oh_version"
+        ver_path.write_text(version, encoding="utf-8")
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Bootstrap
@@ -213,6 +305,9 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("OH — Operational Hub")
     app.setStyle("Fusion")
+
+    # Pre-launch update check (replaces START.bat functionality)
+    _pre_launch_update_check(app)
 
     # Font
     app.setFont(QFont("Segoe UI", 11))

@@ -40,7 +40,7 @@ set /p "LAUNCH=  Launch OH now? (y/n): "
 if /i "%LAUNCH%"=="y" (
     echo.
     echo   Starting OH...
-    start "" "%INSTALL_DIR%\START.bat"
+    start "" "%INSTALL_DIR%\OH.exe"
 )
 
 echo.
@@ -195,7 +195,7 @@ try {
 
     $desktopPath = [System.Environment]::GetFolderPath("Desktop")
     $lnk = $WshShell.CreateShortcut((Join-Path $desktopPath "OH - Operational Hub.lnk"))
-    $lnk.TargetPath = $startPath
+    $lnk.TargetPath = $exePath
     $lnk.WorkingDirectory = $InstallDir
     $lnk.IconLocation = "$exePath,0"
     $lnk.Description = "OH - Operational Hub"
@@ -226,7 +226,7 @@ Write-Host ""
 Write-Host "  Version:  v$version"
 Write-Host "  Location: $InstallDir"
 Write-Host ""
-Write-Host "  Use the desktop shortcut or START.bat to launch OH."
+Write-Host "  Use the desktop shortcut or OH.exe to launch."
 Write-Host "  OH will auto-update on every launch."
 Write-Host ""
 
