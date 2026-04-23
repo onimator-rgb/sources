@@ -7,6 +7,7 @@ assignment counts, and drill-down to per-account detail.
 Data is always read from the OH database (no disk access on open).
 Use "Refresh Sources" to re-read sources.txt/data.db for all accounts.
 """
+import csv
 import logging
 from typing import Optional
 
@@ -14,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QLabel, QLineEdit, QSpinBox, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QMessageBox,
+    QFileDialog, QMessageBox,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -255,6 +256,14 @@ class SourcesTab(QWidget):
         self._discovery_history_btn.setToolTip("View past bulk source discovery runs.")
         self._discovery_history_btn.clicked.connect(self._on_show_discovery_history)
         lo.addWidget(self._discovery_history_btn)
+
+        lo.addSpacing(8)
+
+        self._export_btn = QPushButton("Export CSV")
+        self._export_btn.setFixedHeight(BTN_HEIGHT_MD)
+        self._export_btn.setToolTip("Export filtered follow source table to CSV file.")
+        self._export_btn.clicked.connect(self._on_export_csv)
+        lo.addWidget(self._export_btn)
 
         self._busy_label = QLabel("")
         self._busy_label.setStyleSheet(f"font-style: italic; color: {sc('text_secondary').name()};")
@@ -1011,6 +1020,63 @@ class SourcesTab(QWidget):
     def _on_refresh_error(self, error: str) -> None:
         logger.error(f"Source refresh error: {error}")
         self._set_status(f"Refresh failed: {error}")
+
+    # ------------------------------------------------------------------
+    # Export CSV
+    # ------------------------------------------------------------------
+
+    def _on_export_csv(self) -> None:
+        if not self._all_sources:
+            self._set_status("No data to export.")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Follow Sources CSV", "follow_sources.csv",
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if not path:
+            return
+
+        try:
+            # Get currently filtered data
+            query = self._search_box.text().strip().lower()
+            min_active = self._min_active.value()
+            min_foll = self._min_follows.value()
+            fbr_filt = self._fbr_filter.currentText()
+
+            visible = []
+            for src in self._all_sources:
+                if query and query not in src.source_name.lower():
+                    continue
+                if min_active > 0 and src.active_accounts < min_active:
+                    continue
+                if min_foll > 0 and src.total_follows < min_foll:
+                    continue
+                if not self._fbr_quality_matches(fbr_filt, src):
+                    continue
+                visible.append(src)
+
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(_SOURCE_HEADERS)
+                for src in visible:
+                    writer.writerow([
+                        src.source_name,
+                        src.active_accounts,
+                        src.historical_accounts,
+                        src.total_accounts,
+                        src.total_follows,
+                        src.total_followbacks,
+                        f"{src.avg_fbr_pct:.1f}" if src.avg_fbr_pct is not None else "",
+                        f"{src.weighted_fbr_pct:.1f}" if src.weighted_fbr_pct is not None else "",
+                        f"{src.quality_account_count}/{src.total_accounts}" if src.total_accounts > 0 else "",
+                        src.last_analyzed_at[:10] if src.last_analyzed_at else "",
+                    ])
+
+            self._set_status(f"Exported {len(visible)} sources to {path}")
+        except Exception as e:
+            logger.error(f"CSV export failed: {e}")
+            QMessageBox.critical(self, "Export Failed", str(e))
 
     # ------------------------------------------------------------------
     # Helpers
