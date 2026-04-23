@@ -240,6 +240,7 @@ class MainWindow(QMainWindow):
 
         self._conn                    = conn
         self._worker: Optional[WorkerThread] = None
+        self._refresh_worker: Optional[WorkerThread] = None
         self._all_accounts: list = []
         self._last_discovery: list = []
         self._fbr_map: dict[int, FBRSnapshotRecord] = {}
@@ -1060,56 +1061,112 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _refresh_table(self) -> None:
-        # Remember selection
-        selected_id = self._get_selected_account_id()
+        # Skip if a background refresh is already running
+        if self._refresh_worker is not None and self._refresh_worker.isRunning():
+            logger.debug("Refresh already in progress — skipping")
+            return
 
-        self._all_accounts = self._accounts.get_all()
-        self._fbr_map = self._fbr_service.get_latest_map()
-        self._source_count_map = self._global_sources_service.get_active_source_counts()
+        # Remember selection before refresh
+        self._refresh_selected_id = self._get_selected_account_id()
+
+        # Show loading indicator
+        self._set_status("Loading accounts…")
+
+        self._refresh_worker = WorkerThread(self._load_table_data)
+        self._refresh_worker.result.connect(self._on_refresh_data_loaded)
+        self._refresh_worker.error.connect(self._on_refresh_error)
+        self._refresh_worker.start()
+
+    def _load_table_data(self) -> dict:
+        """Load all table data from DB/services (runs in background thread).
+
+        Returns a dict with all the data needed to populate the table.
+        """
+        data: dict = {}
+        data["all_accounts"] = self._accounts.get_all()
+        data["fbr_map"] = self._fbr_service.get_latest_map()
+        data["source_count_map"] = self._global_sources_service.get_active_source_counts()
+
         if self._session_service:
-            self._session_map = self._session_service.get_session_map(
+            data["session_map"] = self._session_service.get_session_map(
                 date.today().isoformat()
             )
-        # Load operator tags map
+        else:
+            data["session_map"] = {}
+
+        # Operator tags
         if self._tag_repo:
             try:
-                self._op_tags_map = self._tag_repo.get_operator_tags_map()
+                data["op_tags_map"] = self._tag_repo.get_operator_tags_map()
             except Exception:
-                self._op_tags_map = {}
-        # Build device status map for color dots
+                data["op_tags_map"] = {}
+        else:
+            data["op_tags_map"] = {}
+
+        # Device status map
         try:
             rows = self._conn.execute(
                 "SELECT device_id, last_known_status FROM oh_devices"
             ).fetchall()
-            self._device_status_map = {r[0]: r[1] for r in rows}
+            data["device_status_map"] = {r[0]: r[1] for r in rows}
         except Exception:
-            self._device_status_map = {}
-        # Load block map
+            data["device_status_map"] = {}
+
+        # Block map
         if self._block_detection_service:
             try:
-                self._block_map = self._block_detection_service.get_active_blocks()
+                data["block_map"] = self._block_detection_service.get_active_blocks()
             except Exception:
-                self._block_map = {}
-        # Load group membership map
+                data["block_map"] = {}
+        else:
+            data["block_map"] = {}
+
+        # Group membership map
         if self._account_group_repo:
             try:
-                self._group_map = self._account_group_repo.get_membership_map()
+                data["group_map"] = self._account_group_repo.get_membership_map()
             except Exception:
-                self._group_map = {}
-        # Load trend data
+                data["group_map"] = {}
+        else:
+            data["group_map"] = {}
+
+        # Trend data
         if self._trend_service:
             try:
-                active_ids = [a.id for a in self._all_accounts if a.is_active and a.id]
-                self._trend_map = self._trend_service.get_trends_map(active_ids, days=14)
+                active_ids = [a.id for a in data["all_accounts"]
+                              if a.is_active and a.id]
+                data["trend_map"] = self._trend_service.get_trends_map(
+                    active_ids, days=14,
+                )
             except Exception:
-                self._trend_map = {}
+                data["trend_map"] = {}
         else:
-            self._trend_map = {}
+            data["trend_map"] = {}
+
+        return data
+
+    def _on_refresh_data_loaded(self, data: dict) -> None:
+        """Apply loaded data to instance state and populate the table (main thread)."""
+        self._refresh_worker = None
+
+        # Apply data to instance variables
+        self._all_accounts = data["all_accounts"]
+        self._fbr_map = data["fbr_map"]
+        self._source_count_map = data["source_count_map"]
+        self._session_map = data["session_map"]
+        self._op_tags_map = data["op_tags_map"]
+        self._device_status_map = data["device_status_map"]
+        self._block_map = data["block_map"]
+        self._group_map = data["group_map"]
+        self._trend_map = data["trend_map"]
+
+        # Populate UI (must run on main thread)
         self._update_device_filter()
         self._apply_filter()
         self._update_last_sync_label()
 
         # Restore selection
+        selected_id = getattr(self, "_refresh_selected_id", None)
         if selected_id is not None:
             self._select_account_by_id(selected_id)
 
@@ -1118,6 +1175,14 @@ class MainWindow(QMainWindow):
                 and self._detail_panel.isVisible()
                 and self._detail_panel.current_account_id() is not None):
             self._load_detail_for_account(self._detail_panel.current_account_id())
+
+        self._set_status("Ready.")
+
+    def _on_refresh_error(self, error_msg: str) -> None:
+        """Handle background refresh failure."""
+        self._refresh_worker = None
+        logger.error("Background table refresh failed: %s", error_msg)
+        self._set_status(f"Refresh failed: {error_msg}")
 
     def _get_selected_account_id(self) -> int:
         """Return the account_id of the currently selected row, or None."""
