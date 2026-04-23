@@ -96,10 +96,10 @@ class FBRCalculator:
 
                 rows = conn.execute(_AGGREGATION_SQL).fetchall()
 
-        except sqlite3.OperationalError as e:
+        except sqlite3.DatabaseError as e:
             result.schema_valid = False
             result.schema_error = f"Cannot read data.db: {e}"
-            logger.warning(f"FBRCalculator: OperationalError for {username}@{device_id}: {e}")
+            logger.warning(f"FBRCalculator: DatabaseError for {username}@{device_id}: {e}")
             return result
 
         for row in rows:

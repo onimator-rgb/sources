@@ -487,21 +487,16 @@ class TestFBRCalculator(unittest.TestCase):
 
     def test_corrupt_db_raises_database_error(self):
         """
-        BUG: calculate() catches OperationalError but not DatabaseError.
-
-        A corrupt data.db raises sqlite3.DatabaseError which is NOT caught,
-        meaning calculate() can raise despite the docstring claiming it
-        never does. This test documents the current behavior.
-
-        Fix: catch sqlite3.DatabaseError instead of sqlite3.OperationalError
-        in fbr_calculator.py line 99.
+        Corrupt data.db must be handled gracefully — calculate() should
+        never raise, returning a result with schema_valid=False instead.
         """
         db_path = self._data_db_path()
         db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.write_bytes(b"this is not a sqlite database")
 
-        with self.assertRaises(sqlite3.DatabaseError):
-            self.calculator.calculate(self.device_id, self.username)
+        result = self.calculator.calculate(self.device_id, self.username)
+        self.assertFalse(result.schema_valid)
+        self.assertIn("Cannot read data.db", result.schema_error)
 
     # ------------------------------------------------------------------
     # Large dataset performance
