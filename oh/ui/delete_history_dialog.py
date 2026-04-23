@@ -20,19 +20,22 @@ from PySide6.QtGui import QColor, QFont
 from oh.models.delete_history import SourceDeleteResult
 from oh.repositories.delete_history_repo import DeleteHistoryRepository
 from oh.ui.delete_confirm_dialog import DeleteConfirmDialog
+from oh.ui.style import sc
 
 logger = logging.getLogger(__name__)
 
-_TYPE_COLORS = {
-    "single": QColor("#86c5f0"),
-    "bulk":   QColor("#e6a817"),
-    "revert": QColor("#4caf7d"),
-}
+def _type_colors():
+    return {
+        "single": sc("link"),
+        "bulk":   sc("warning"),
+        "revert": sc("success"),
+    }
 
-_STATUS_COLORS = {
-    "completed": QColor("#4caf7d"),
-    "reverted":  QColor("#888888"),
-}
+def _status_colors():
+    return {
+        "completed": sc("success"),
+        "reverted":  sc("muted"),
+    }
 
 
 class DeleteHistoryDialog(QDialog):
@@ -169,7 +172,7 @@ class DeleteHistoryDialog(QDialog):
             self._actions_table.insertRow(0)
             msg = QTableWidgetItem("No deletion history yet.")
             msg.setTextAlignment(center)
-            msg.setForeground(QColor("#777"))
+            msg.setForeground(sc("muted"))
             self._actions_table.setItem(0, 0, msg)
             self._actions_table.setSpan(0, 0, 1, 7)
             return
@@ -187,7 +190,7 @@ class DeleteHistoryDialog(QDialog):
             status_item = QTableWidgetItem(action.status.capitalize())
             status_item.setTextAlignment(center)
             status_item.setForeground(
-                _STATUS_COLORS.get(action.status, QColor("#aaa"))
+                _status_colors().get(action.status, sc("text_secondary"))
             )
             self._actions_table.setItem(r, 1, status_item)
 
@@ -203,7 +206,7 @@ class DeleteHistoryDialog(QDialog):
             type_item = QTableWidgetItem(type_text)
             type_item.setTextAlignment(center)
             type_item.setForeground(
-                _TYPE_COLORS.get(action.delete_type, QColor("#aaa"))
+                _type_colors().get(action.delete_type, sc("text_secondary"))
             )
             self._actions_table.setItem(r, 2, type_item)
 
@@ -291,7 +294,7 @@ class DeleteHistoryDialog(QDialog):
                 i = QTableWidgetItem(val)
                 i.setTextAlignment(center)
                 if col == 3 and item.files_failed > 0:
-                    i.setForeground(QColor("#e05555"))
+                    i.setForeground(sc("error"))
                 self._items_table.setItem(r, col, i)
             accs = ", ".join(item.affected_accounts[:8])
             if len(item.affected_accounts) > 8:

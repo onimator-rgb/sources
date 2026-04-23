@@ -19,17 +19,18 @@ from PySide6.QtGui import QFont
 
 from oh.models.license import LicenseStatus
 from oh.services.license_service import LicenseService
+from oh.ui.style import sc
 
 logger = logging.getLogger(__name__)
 
-_STATUS_LABELS = {
-    LicenseStatus.VALID: ("Valid", "#27ae60"),
-    LicenseStatus.GRACE_PERIOD: ("Grace Period", "#e67e22"),
-    LicenseStatus.EXPIRED: ("Expired", "#e74c3c"),
-    LicenseStatus.INVALID_HWID: ("Invalid — HWID Mismatch", "#e74c3c"),
-    LicenseStatus.INVALID_SIGNATURE: ("Invalid — Bad Signature", "#e74c3c"),
-    LicenseStatus.MISSING: ("No License Found", "#e74c3c"),
-    LicenseStatus.CORRUPT: ("Corrupt License File", "#e74c3c"),
+_STATUS_LABEL_TEXT = {
+    LicenseStatus.VALID: ("Valid", "success"),
+    LicenseStatus.GRACE_PERIOD: ("Grace Period", "warning"),
+    LicenseStatus.EXPIRED: ("Expired", "error"),
+    LicenseStatus.INVALID_HWID: ("Invalid — HWID Mismatch", "error"),
+    LicenseStatus.INVALID_SIGNATURE: ("Invalid — Bad Signature", "error"),
+    LicenseStatus.MISSING: ("No License Found", "error"),
+    LicenseStatus.CORRUPT: ("Corrupt License File", "error"),
 }
 
 
@@ -140,10 +141,10 @@ class LicenseDialog(QDialog):
     def _refresh_status(self) -> None:
         """Update all labels from current license service state."""
         status = self._license_service.verify()
-        label_text, color = _STATUS_LABELS.get(status, ("Unknown", "#999"))
+        label_text, color_key = _STATUS_LABEL_TEXT.get(status, ("Unknown", "muted"))
 
         self._status_label.setText(label_text)
-        self._status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+        self._status_label.setStyleSheet(f"color: {sc(color_key).name()}; font-weight: bold;")
 
         client = self._license_service.get_client_name()
         expiry = self._license_service.get_expiry_date()
@@ -160,50 +161,50 @@ class LicenseDialog(QDialog):
                 self._days_label.setText(
                     f"Expired — {grace_left} grace day(s) remaining"
                 )
-                self._days_label.setStyleSheet("color: #e67e22;")
+                self._days_label.setStyleSheet(f"color: {sc('warning').name()};")
         else:
             self._days_label.setText("—")
 
         # Message based on status
         if status == LicenseStatus.VALID:
             self._message_label.setText("License is valid.")
-            self._message_label.setStyleSheet("color: #27ae60;")
+            self._message_label.setStyleSheet(f"color: {sc('success').name()};")
         elif status == LicenseStatus.GRACE_PERIOD:
             grace_left = 7 - abs(days)
             self._message_label.setText(
                 f"License has expired but you are in the 7-day grace period.\n"
                 f"{grace_left} day(s) remaining. Please renew your license."
             )
-            self._message_label.setStyleSheet("color: #e67e22;")
+            self._message_label.setStyleSheet(f"color: {sc('warning').name()};")
         elif status == LicenseStatus.MISSING:
             self._message_label.setText(
                 "No license file found.\n"
                 "Copy your HWID above and send it to your provider to receive a license."
             )
-            self._message_label.setStyleSheet("color: #e74c3c;")
+            self._message_label.setStyleSheet(f"color: {sc('error').name()};")
         elif status == LicenseStatus.INVALID_HWID:
             self._message_label.setText(
                 "This license was issued for a different machine.\n"
                 "Contact your provider with the HWID shown above."
             )
-            self._message_label.setStyleSheet("color: #e74c3c;")
+            self._message_label.setStyleSheet(f"color: {sc('error').name()};")
         elif status == LicenseStatus.INVALID_SIGNATURE:
             self._message_label.setText(
                 "License file has an invalid signature.\n"
                 "The file may be corrupted or tampered with."
             )
-            self._message_label.setStyleSheet("color: #e74c3c;")
+            self._message_label.setStyleSheet(f"color: {sc('error').name()};")
         elif status == LicenseStatus.EXPIRED:
             self._message_label.setText(
                 "License has expired and the grace period is over.\n"
                 "Please contact your provider to renew."
             )
-            self._message_label.setStyleSheet("color: #e74c3c;")
+            self._message_label.setStyleSheet(f"color: {sc('error').name()};")
         else:
             self._message_label.setText(
                 "License file is corrupt. Please obtain a new license."
             )
-            self._message_label.setStyleSheet("color: #e74c3c;")
+            self._message_label.setStyleSheet(f"color: {sc('error').name()};")
 
     def _copy_hwid(self) -> None:
         """Copy machine HWID to clipboard."""
@@ -211,7 +212,7 @@ class LicenseDialog(QDialog):
         if clipboard is not None:
             clipboard.setText(self._license_service.get_hwid())
             self._message_label.setText("HWID copied to clipboard.")
-            self._message_label.setStyleSheet("color: #3498db;")
+            self._message_label.setStyleSheet(f"color: {sc('link').name()};")
 
     def _load_license(self) -> None:
         """Open file picker, install selected license file, and re-verify."""
@@ -258,6 +259,6 @@ class LicenseDialog(QDialog):
                 "A valid license is required to use OH.\n"
                 "Load a license file or click Exit."
             )
-            self._message_label.setStyleSheet("color: #e74c3c;")
+            self._message_label.setStyleSheet(f"color: {sc('error').name()};")
         else:
             super().closeEvent(event)

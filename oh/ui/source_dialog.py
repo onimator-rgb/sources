@@ -67,18 +67,20 @@ _HEADERS = [
 # Palette
 # ---------------------------------------------------------------------------
 
-_C_ACTIVE_HIST = QColor("#4caf7d")   # green  — active + history
-_C_ACTIVE_NEW  = QColor("#e6a817")   # amber  — active, not in data.db yet
-_C_HISTORICAL  = QColor("#888888")   # grey   — historical only
-_C_YES         = QColor("#4caf7d")
-_C_NO          = QColor("#555555")
-_C_QUALITY     = QColor("#4caf7d")   # green checkmark
-_C_LOW_FBR     = QColor("#888888")   # grey   — below threshold or no data
-_C_ANOMALY     = QColor("#e05555")   # red    — data anomaly
-_C_WARN_BG     = "background: #3a2e00; color: #e6a817; padding: 6px 10px; border-radius: 4px;"
-_C_ERR_BG      = "background: #3a0000; color: #e05555; padding: 6px 10px; border-radius: 4px;"
+def _C_ACTIVE_HIST(): return sc("success")    # green  — active + history
+def _C_ACTIVE_NEW():  return sc("warning")    # amber  — active, not in data.db yet
+def _C_HISTORICAL():  return sc("muted")      # grey   — historical only
+def _C_YES():         return sc("success")
+def _C_NO():          return sc("dimmed")
+def _C_QUALITY():     return sc("success")    # green checkmark
+def _C_LOW_FBR():     return sc("muted")      # grey   — below threshold or no data
+def _C_ANOMALY():     return sc("error")      # red    — data anomaly
+def _C_WARN_BG():
+    return f"background: {sc('bg_note').name()}; color: {sc('warning').name()}; padding: 6px 10px; border-radius: 4px;"
+def _C_ERR_BG():
+    return f"background: {sc('bg_note').name()}; color: {sc('error').name()}; padding: 6px 10px; border-radius: 4px;"
 
-_STATUS_COLOR = {
+_STATUS_COLOR_FN = {
     STATUS_ACTIVE_WITH_ACTIVITY: _C_ACTIVE_HIST,
     STATUS_ACTIVE_NO_ACTIVITY:   _C_ACTIVE_NEW,
     STATUS_HISTORICAL_ONLY:      _C_HISTORICAL,
@@ -275,7 +277,7 @@ class SourceDialog(QDialog):
         )
 
         row1 = QLabel(
-            f"Quality sources: <b style='color:#4caf7d'>{fbr.quality_count}</b> / {fbr.total_count}"
+            f"Quality sources: <b style='color:{sc('success').name()}'>{fbr.quality_count}</b> / {fbr.total_count}"
             f"&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;"
             f"Best FBR: {best_str}"
             f"&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;"
@@ -287,7 +289,7 @@ class SourceDialog(QDialog):
 
         # Row 2: thresholds + secondary stats
         anomaly_note = (
-            f"  ·  <span style='color:#e05555'>{fbr.anomaly_count} anomaly(s)</span>"
+            f"  ·  <span style='color:{sc('error').name()}'>{fbr.anomaly_count} anomaly(s)</span>"
             if fbr.anomaly_count else ""
         )
         row2 = QLabel(
@@ -310,7 +312,7 @@ class SourceDialog(QDialog):
         self, warnings: list[str], error: bool = False
     ) -> QLabel:
         prefix = "  ✕  " if error else "  ⚠  "
-        style  = _C_ERR_BG if error else _C_WARN_BG
+        style  = _C_ERR_BG() if error else _C_WARN_BG()
         lbl = QLabel(prefix + "   ·   ".join(warnings))
         lbl.setStyleSheet(style)
         lbl.setWordWrap(True)
@@ -468,7 +470,7 @@ class SourceDialog(QDialog):
         # Status (from source inspector)
         status_item = QTableWidgetItem(src.status_label)
         status_item.setTextAlignment(center)
-        status_item.setForeground(_STATUS_COLOR[src.status])
+        status_item.setForeground(_STATUS_COLOR_FN[src.status]())
         t.setItem(row, COL_STATUS, status_item)
 
         # Date added (from source_assignments.created_at)
@@ -477,7 +479,7 @@ class SourceDialog(QDialog):
         added_item = QTableWidgetItem(added_date)
         added_item.setTextAlignment(center)
         if added_date == "\u2014":
-            added_item.setForeground(_C_LOW_FBR)
+            added_item.setForeground(_C_LOW_FBR())
         t.setItem(row, COL_ADDED, added_item)
 
         # File presence
@@ -490,10 +492,10 @@ class SourceDialog(QDialog):
             for col in (COL_FOLLOWS, COL_FOLLOWBACK, COL_FBR, COL_QUALITY):
                 i = QTableWidgetItem("—")
                 i.setTextAlignment(center)
-                i.setForeground(_C_LOW_FBR)
+                i.setForeground(_C_LOW_FBR())
                 t.setItem(row, col, i)
         else:
-            anomaly_color = _C_ANOMALY if fbr.anomaly else None
+            anomaly_color = _C_ANOMALY() if fbr.anomaly else None
 
             follows_item = _NumericItem(f"{fbr.follow_count:,}")
             follows_item.setTextAlignment(right)
@@ -512,9 +514,9 @@ class SourceDialog(QDialog):
             if anomaly_color:
                 fbr_item.setForeground(anomaly_color)
             elif fbr.fbr_percent >= self._fbr.min_fbr_pct and fbr.follow_count >= self._fbr.min_follows:
-                fbr_item.setForeground(_C_QUALITY)
+                fbr_item.setForeground(_C_QUALITY())
             else:
-                fbr_item.setForeground(_C_LOW_FBR)
+                fbr_item.setForeground(_C_LOW_FBR())
             t.setItem(row, COL_FBR, fbr_item)
 
             quality_item = QTableWidgetItem("✓" if fbr.is_quality else "✗")
@@ -526,11 +528,11 @@ class SourceDialog(QDialog):
         if usage is None or not usage.db_found:
             used_item = _NumericItem("—")
             used_item.setTextAlignment(center)
-            used_item.setForeground(_C_LOW_FBR)
+            used_item.setForeground(_C_LOW_FBR())
         elif usage.db_error is not None:
             used_item = _NumericItem("?")
             used_item.setTextAlignment(center)
-            used_item.setForeground(_C_ANOMALY)
+            used_item.setForeground(_C_ANOMALY())
             used_item.setToolTip(f"Read error: {usage.db_error}")
         else:
             used_item = _NumericItem(f"{usage.used_count:,}")
@@ -549,7 +551,7 @@ class SourceDialog(QDialog):
         else:
             pct_item = _NumericItem("—")
             pct_item.setTextAlignment(center)
-            pct_item.setForeground(_C_LOW_FBR)
+            pct_item.setForeground(_C_LOW_FBR())
             if usage is not None and usage.pct_file_error:
                 pct_item.setToolTip(f"Percent file error: {usage.pct_file_error}")
         t.setItem(row, COL_USED_PCT, pct_item)
@@ -563,17 +565,17 @@ class SourceDialog(QDialog):
         if self._fbr.has_data:
             fbr_note = (
                 "&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;"
-                f"<span style='color:#4caf7d'>✓</span> Quality = "
+                f"<span style='color:{sc('success').name()}'>✓</span> Quality = "
                 f"≥{self._fbr.min_follows:,} follows AND "
                 f"≥{self._fbr.min_fbr_pct:.0f}% FBR"
             )
 
         lbl = QLabel(
-            "<span style='color:#4caf7d'>■</span> Active + history"
+            f"<span style='color:{sc('success').name()}'>■</span> Active + history"
             "&nbsp;&nbsp;"
-            "<span style='color:#e6a817'>■</span> Active (new)"
+            f"<span style='color:{sc('warning').name()}'>■</span> Active (new)"
             "&nbsp;&nbsp;"
-            "<span style='color:#888'>■</span> Historical only"
+            f"<span style='color:{sc('muted').name()}'>■</span> Historical only"
             f"{fbr_note}"
         )
         lbl.setStyleSheet("font-size: 10px; color: %s; padding-top: 2px;" % sc("text_secondary").name())
@@ -593,8 +595,8 @@ class SourceDialog(QDialog):
             self._delete_btn.setFixedWidth(160)
             self._delete_btn.setEnabled(False)
             self._delete_btn.setStyleSheet(
-                "QPushButton:enabled { color: #e05555; }"
-                "QPushButton:enabled:hover { background: #3a1a1a; }"
+                f"QPushButton:enabled {{ color: {sc('error').name()}; }}"
+                f"QPushButton:enabled:hover {{ background: {sc('bg_note').name()}; }}"
             )
             self._delete_btn.setToolTip("Delete selected sources (multi-select with Ctrl/Shift)")
             self._delete_btn.clicked.connect(self._on_delete_clicked)
@@ -604,8 +606,8 @@ class SourceDialog(QDialog):
             cleanup_btn = QPushButton("Remove Non-Quality Sources")
             cleanup_btn.setFixedWidth(200)
             cleanup_btn.setStyleSheet(
-                "QPushButton { color: #e6a817; }"
-                "QPushButton:hover { background: #3a2e00; }"
+                f"QPushButton {{ color: {sc('warning').name()}; }}"
+                f"QPushButton:hover {{ background: {sc('bg_note').name()}; }}"
             )
             cleanup_btn.clicked.connect(self._on_cleanup_clicked)
             lo.addWidget(cleanup_btn)
@@ -674,7 +676,7 @@ class SourceDialog(QDialog):
                     for col in range(self._source_table.columnCount()):
                         cell = self._source_table.item(row, col)
                         if cell:
-                            cell.setForeground(_C_LOW_FBR)
+                            cell.setForeground(_C_LOW_FBR())
                     si = self._source_table.item(row, COL_SOURCE)
                     if si:
                         si.setText(f"{source_name}  (deleted)")
@@ -728,7 +730,7 @@ class SourceDialog(QDialog):
                             for col in range(self._source_table.columnCount()):
                                 cell = self._source_table.item(row, col)
                                 if cell:
-                                    cell.setForeground(_C_LOW_FBR)
+                                    cell.setForeground(_C_LOW_FBR())
             elif result.accounts_not_found > 0:
                 QMessageBox.information(
                     self,
@@ -750,5 +752,5 @@ class SourceDialog(QDialog):
 def _bool_item(val: bool) -> QTableWidgetItem:
     i = QTableWidgetItem("Yes" if val else "No")
     i.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-    i.setForeground(_C_YES if val else _C_NO)
+    i.setForeground(_C_YES() if val else _C_NO())
     return i

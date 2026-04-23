@@ -15,19 +15,22 @@ from PySide6.QtGui import (
     QPainter, QPen, QColor, QLinearGradient, QPolygonF, QPainterPath,
 )
 
+from oh.ui.style import sc
+
 # Re-export from trend_service (canonical location) to avoid circular imports
 from oh.services.trend_service import (
     compute_trend, TREND_UP, TREND_DOWN, TREND_STABLE, TREND_NONE,
 )
 
 
-# Trend arrow unicode + color
-_TREND_ARROWS = {
-    TREND_UP:     ("\u25b2", "#4CAF50"),   # ▲ green
-    TREND_DOWN:   ("\u25bc", "#F44336"),   # ▼ red
-    TREND_STABLE: ("\u25ac", "#9E9E9E"),   # ▬ gray
-    TREND_NONE:   ("",       "#9E9E9E"),
-}
+def _trend_arrows():
+    """Return trend arrow map with theme-aware colors (evaluated at paint time)."""
+    return {
+        TREND_UP:     ("\u25b2", sc("success")),   # ▲ green
+        TREND_DOWN:   ("\u25bc", sc("error")),      # ▼ red
+        TREND_STABLE: ("\u25ac", sc("muted")),      # ▬ gray
+        TREND_NONE:   ("",       sc("muted")),
+    }
 
 
 class SparklineWidget(QWidget):
@@ -113,9 +116,9 @@ class SparklineWidget(QWidget):
 
         # Trend arrow
         trend = compute_trend(values)
-        arrow_text, arrow_color = _TREND_ARROWS.get(trend, ("", "#9E9E9E"))
+        arrow_text, arrow_color = _trend_arrows().get(trend, ("", sc("muted")))
         if arrow_text:
-            painter.setPen(QColor(arrow_color))
+            painter.setPen(arrow_color)
             font = painter.font()
             font.setPixelSize(10)
             painter.setFont(font)

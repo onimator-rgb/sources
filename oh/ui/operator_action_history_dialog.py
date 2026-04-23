@@ -16,17 +16,19 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 from oh.repositories.operator_action_repo import OperatorActionRepository
+from oh.ui.style import sc
 
 logger = logging.getLogger(__name__)
 
-_TYPE_COLORS = {
-    "set_review":       QColor("#e6a817"),
-    "clear_review":     QColor("#888888"),
-    "add_tag":          QColor("#86c5f0"),
-    "remove_tag":       QColor("#888888"),
-    "increment_tb":     QColor("#e05555"),
-    "increment_limits": QColor("#e6a817"),
-}
+def _type_colors():
+    return {
+        "set_review":       sc("warning"),
+        "clear_review":     sc("muted"),
+        "add_tag":          sc("link"),
+        "remove_tag":       sc("muted"),
+        "increment_tb":     sc("error"),
+        "increment_limits": sc("warning"),
+    }
 
 _TYPE_LABELS = {
     "set_review":       "Set Review",
@@ -130,7 +132,7 @@ class OperatorActionHistoryDialog(QDialog):
 
             dt = (action.performed_at or "")[:19].replace("T", "  ")
             action_label = _TYPE_LABELS.get(action.action_type, action.action_type)
-            action_color = _TYPE_COLORS.get(action.action_type)
+            action_color = _type_colors().get(action.action_type)
 
             cells = [
                 dt,

@@ -2054,9 +2054,9 @@ class MainWindow(QMainWindow):
             trend_text = arrow
         trend_item = self._make_item(trend_text, center, dimmed=removed)
         if trend_text == "\u25b2":
-            trend_item.setForeground(QColor("#4CAF50"))
+            trend_item.setForeground(sc("success"))
         elif trend_text == "\u25bc":
-            trend_item.setForeground(QColor("#F44336"))
+            trend_item.setForeground(sc("error"))
         self._table.setItem(row, COL_TREND, trend_item)
 
         # Block indicator

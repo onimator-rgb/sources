@@ -181,7 +181,7 @@ class SourcesTab(QWidget):
         )
         self._delete_btn.setStyleSheet(
             f"QPushButton:enabled {{ color: {sc('error').name()}; }}"
-            f"QPushButton:enabled:hover {{ background: #3a1a1a; }}"
+            f"QPushButton:enabled:hover {{ background: {sc('bg_note').name()}; }}"
         )
         self._delete_btn.clicked.connect(self._on_delete_source)
         lo.addWidget(self._delete_btn)
@@ -195,7 +195,7 @@ class SourcesTab(QWidget):
         )
         self._bulk_delete_btn.setStyleSheet(
             f"QPushButton {{ color: {sc('warning').name()}; }}"
-            f"QPushButton:hover {{ background: #2a2010; }}"
+            f"QPushButton:hover {{ background: {sc('bg_note').name()}; }}"
         )
         self._bulk_delete_btn.clicked.connect(self._on_bulk_delete)
         lo.addWidget(self._bulk_delete_btn)
@@ -208,7 +208,7 @@ class SourcesTab(QWidget):
         )
         self._distribute_btn.setStyleSheet(
             f"QPushButton {{ color: {sc('link').name()}; }}"
-            f"QPushButton:hover {{ background: #1a2a3a; }}"
+            f"QPushButton:hover {{ background: {sc('bg_note').name()}; }}"
         )
         self._distribute_btn.clicked.connect(self._on_distribute_sources)
         lo.addWidget(self._distribute_btn)
@@ -229,7 +229,7 @@ class SourcesTab(QWidget):
         )
         self._bulk_find_btn.setStyleSheet(
             f"QPushButton {{ color: {sc('link').name()}; }}"
-            f"QPushButton:hover {{ background: #1a2a3a; }}"
+            f"QPushButton:hover {{ background: {sc('bg_note').name()}; }}"
         )
         self._bulk_find_btn.clicked.connect(self._on_bulk_find_sources)
         lo.addWidget(self._bulk_find_btn)

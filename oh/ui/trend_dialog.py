@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt
 
 from oh.services.trend_service import TrendService
 from oh.ui.sparkline_widget import SparklineWidget, compute_trend, TREND_UP, TREND_DOWN
+from oh.ui.style import sc
 
 logger = logging.getLogger(__name__)
 
@@ -66,20 +67,20 @@ class TrendDialog(QDialog):
         # Follow trend
         follow_group = QGroupBox("Daily Follows")
         follow_lo = QVBoxLayout(follow_group)
-        self._follow_spark = SparklineWidget(width=450, height=80, color="#4CAF50")
+        self._follow_spark = SparklineWidget(width=450, height=80, color=sc("success").name())
         follow_lo.addWidget(self._follow_spark)
         self._follow_label = QLabel("")
-        self._follow_label.setStyleSheet("font-size: 11px; color: gray;")
+        self._follow_label.setStyleSheet(f"font-size: 11px; color: {sc('muted').name()};")
         follow_lo.addWidget(self._follow_label)
         lo.addWidget(follow_group)
 
         # FBR trend
         fbr_group = QGroupBox("FBR% Trend")
         fbr_lo = QVBoxLayout(fbr_group)
-        self._fbr_spark = SparklineWidget(width=450, height=80, color="#2196F3")
+        self._fbr_spark = SparklineWidget(width=450, height=80, color=sc("link").name())
         fbr_lo.addWidget(self._fbr_spark)
         self._fbr_label = QLabel("")
-        self._fbr_label.setStyleSheet("font-size: 11px; color: gray;")
+        self._fbr_label.setStyleSheet(f"font-size: 11px; color: {sc('muted').name()};")
         fbr_lo.addWidget(self._fbr_label)
         lo.addWidget(fbr_group)
 
@@ -105,7 +106,7 @@ class TrendDialog(QDialog):
 
         # Follow sparkline
         if follows and any(f > 0 for f in follows):
-            self._follow_spark.set_values([float(f) for f in follows], "#4CAF50")
+            self._follow_spark.set_values([float(f) for f in follows], sc("success").name())
             avg = sum(follows) / len(follows) if follows else 0
             trend = compute_trend([float(f) for f in follows])
             arrow = {"up": "\u25b2", "down": "\u25bc", "stable": "\u25ac"}.get(trend, "")
@@ -119,7 +120,7 @@ class TrendDialog(QDialog):
 
         # FBR sparkline
         if fbr and len(fbr) >= 2:
-            self._fbr_spark.set_values(fbr, "#2196F3")
+            self._fbr_spark.set_values(fbr, sc("link").name())
             avg_fbr = sum(fbr) / len(fbr)
             trend = compute_trend(fbr)
             arrow = {"up": "\u25b2", "down": "\u25bc", "stable": "\u25ac"}.get(trend, "")
