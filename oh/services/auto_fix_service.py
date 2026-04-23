@@ -206,7 +206,7 @@ class AutoFixService:
     def _detect_tb_candidates(self) -> List[AutoFixProposal]:
         """Find accounts eligible for TB escalation. Returns proposals."""
         proposals: List[AutoFixProposal] = []
-        active = self._accounts.get_active_accounts()
+        active = self._accounts.get_all_active()
 
         for acc in active:
             rows = self._conn.execute(
@@ -295,11 +295,11 @@ class AutoFixService:
     def _detect_duplicate_sources(self, bot_root: str) -> List[AutoFixProposal]:
         """Find accounts with duplicate source entries. Returns proposals."""
         proposals: List[AutoFixProposal] = []
-        active = self._accounts.get_active_accounts()
+        active = self._accounts.get_all_active()
 
         for acc in active:
             sources_path = (
-                Path(bot_root) / acc.device_id / "accounts" / acc.username / "sources.txt"
+                Path(bot_root) / acc.device_id / acc.username / "sources.txt"
             )
             if not sources_path.exists():
                 continue
@@ -434,12 +434,13 @@ class AutoFixService:
     def _filter_eligible_assignments(self, assignments: list,
                                      min_source_warning: int) -> list:
         """Filter assignments to those eligible for source removal."""
+        source_counts = self._assignments.get_active_source_counts()
         eligible = []
         for acc_id, device_id, username, device_name in assignments:
             acc = self._accounts.get_by_id(acc_id)
             if acc is None or not acc.is_active:
                 continue
-            current_sources = acc.active_sources_count or 0
+            current_sources = source_counts.get(acc_id, 0)
             if current_sources <= min_source_warning:
                 continue
             eligible.append((acc_id, device_id, username, device_name))

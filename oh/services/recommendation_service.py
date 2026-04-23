@@ -442,9 +442,11 @@ class RecommendationService:
     def _is_active_slot(acc, current_hour: int) -> bool:
         """Check if the account's scheduled slot covers the current hour."""
         try:
-            start = int(acc.start_time or 0)
-            end = int(acc.end_time or 0)
-        except (ValueError, TypeError):
+            raw_start = acc.start_time or "0"
+            raw_end = acc.end_time or "0"
+            start = int(raw_start.split(":")[0])
+            end = int(raw_end.split(":")[0])
+        except (ValueError, TypeError, AttributeError):
             return False
         if start == 0 and end == 0:
             return False
