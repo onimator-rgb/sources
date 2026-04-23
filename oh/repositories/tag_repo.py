@@ -39,34 +39,33 @@ class TagRepository:
         Replace all bot-sourced tags for an account with the given list.
         Operator tags are never touched.
         """
-        self._conn.execute(
-            "DELETE FROM account_tags WHERE account_id = ? AND tag_source = ?",
-            (account_id, TAG_SOURCE_BOT),
-        )
-
-        if tags:
-            now = utcnow()
-            self._conn.executemany(
-                """
-                INSERT INTO account_tags
-                    (account_id, tag_source, tag_category, tag_value,
-                     tag_level, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        account_id,
-                        TAG_SOURCE_BOT,
-                        tag.tag_category,
-                        tag.tag_value,
-                        tag.tag_level,
-                        now,
-                    )
-                    for tag in tags
-                ],
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM account_tags WHERE account_id = ? AND tag_source = ?",
+                (account_id, TAG_SOURCE_BOT),
             )
 
-        self._conn.commit()
+            if tags:
+                now = utcnow()
+                self._conn.executemany(
+                    """
+                    INSERT INTO account_tags
+                        (account_id, tag_source, tag_category, tag_value,
+                         tag_level, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            account_id,
+                            TAG_SOURCE_BOT,
+                            tag.tag_category,
+                            tag.tag_value,
+                            tag.tag_level,
+                            now,
+                        )
+                        for tag in tags
+                    ],
+                )
 
     # ------------------------------------------------------------------
     # Writes — operator tags

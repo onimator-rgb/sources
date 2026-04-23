@@ -25,6 +25,7 @@ import logging
 import socket
 from typing import Optional
 
+from oh.db.connection import transaction
 from oh.models.delete_history import DeleteAction, DeleteItem, SourceDeleteResult
 from oh.models.fbr import SourceFBRRecord
 from oh.models.global_source import GlobalSourceRecord
@@ -54,6 +55,7 @@ class SourceDeleteService:
         self._settings     = settings_repo
         self._sources_svc  = global_sources_service
         self._fbr_repo     = fbr_snapshot_repo
+        self._conn         = assignment_repo._conn
 
     # ------------------------------------------------------------------
     # Public accessors (used by UI to avoid reaching into internals)
@@ -116,7 +118,6 @@ class SourceDeleteService:
             if fr.removed:
                 result.accounts_removed += 1
                 affected_usernames.append(username)
-                self._assignments.mark_source_inactive(acc_id, source_name)
                 item.files_removed += 1
                 affected_details.append({
                     "account_id": acc_id,
@@ -126,8 +127,6 @@ class SourceDeleteService:
                 })
             elif not fr.found:
                 result.accounts_not_found += 1
-                # Treat "already absent" as a soft success — mark inactive in OH too
-                self._assignments.mark_source_inactive(acc_id, source_name)
                 item.files_not_found += 1
             else:
                 result.accounts_failed += 1
@@ -139,15 +138,21 @@ class SourceDeleteService:
         item.affected_accounts = affected_usernames
         item.affected_details = affected_details
 
-        action = DeleteAction(
-            deleted_at=utcnow(),
-            delete_type="single",
-            scope="global",
-            total_sources=1,
-            total_accounts_affected=len(affected_usernames),
-            machine=socket.gethostname(),
-        )
-        result.action_id = self._history.save_action(action, [item])
+        # Commit all DB changes atomically: assignment updates + audit trail
+        with transaction(self._conn):
+            for acc_id, fr in files_results:
+                if fr.removed or not fr.found:
+                    self._assignments.mark_source_inactive(acc_id, source_name)
+
+            action = DeleteAction(
+                deleted_at=utcnow(),
+                delete_type="single",
+                scope="global",
+                total_sources=1,
+                total_accounts_affected=len(affected_usernames),
+                machine=socket.gethostname(),
+            )
+            result.action_id = self._history.save_action(action, [item])
 
         logger.info(
             f"[Delete] scope=global source='{source_name}' "
@@ -192,6 +197,8 @@ class SourceDeleteService:
         deleter = SourceDeleter(bot_root)
         items: list[DeleteItem] = []
         all_affected: set[str] = set()
+        # Collect (acc_id, source_name) pairs to mark inactive in one transaction
+        to_deactivate: list[tuple[int, str]] = []
 
         for src in sources_to_delete:
             assignments = self._assignments.get_active_assignments_for_source(src.source_name)
@@ -207,7 +214,7 @@ class SourceDeleteService:
                     item.files_removed += 1
                     item.affected_accounts.append(username)
                     all_affected.add(username)
-                    self._assignments.mark_source_inactive(acc_id, src.source_name)
+                    to_deactivate.append((acc_id, src.source_name))
                     item_details.append({
                         "account_id": acc_id,
                         "device_id": device_id,
@@ -217,7 +224,7 @@ class SourceDeleteService:
                 elif not fr.found:
                     result.accounts_not_found += 1
                     item.files_not_found += 1
-                    self._assignments.mark_source_inactive(acc_id, src.source_name)
+                    to_deactivate.append((acc_id, src.source_name))
                 else:
                     result.accounts_failed += 1
                     item.files_failed += 1
@@ -228,16 +235,21 @@ class SourceDeleteService:
             item.affected_details = item_details
             items.append(item)
 
-        action = DeleteAction(
-            deleted_at=utcnow(),
-            delete_type="bulk",
-            scope="global",
-            total_sources=len(sources_to_delete),
-            total_accounts_affected=len(all_affected),
-            threshold_pct=threshold_pct,
-            machine=socket.gethostname(),
-        )
-        result.action_id = self._history.save_action(action, items)
+        # Commit all DB changes atomically: assignment updates + audit trail
+        with transaction(self._conn):
+            for acc_id, src_name in to_deactivate:
+                self._assignments.mark_source_inactive(acc_id, src_name)
+
+            action = DeleteAction(
+                deleted_at=utcnow(),
+                delete_type="bulk",
+                scope="global",
+                total_sources=len(sources_to_delete),
+                total_accounts_affected=len(all_affected),
+                threshold_pct=threshold_pct,
+                machine=socket.gethostname(),
+            )
+            result.action_id = self._history.save_action(action, items)
 
         logger.info(
             f"[Delete] scope=bulk threshold={threshold_pct}% "
@@ -273,7 +285,6 @@ class SourceDeleteService:
 
         if fr.removed:
             result.accounts_removed = 1
-            self._assignments.mark_source_inactive(account_id, source_name)
             affected_details.append({
                 "account_id": account_id,
                 "device_id": device_id,
@@ -282,7 +293,6 @@ class SourceDeleteService:
             })
         elif not fr.found:
             result.accounts_not_found = 1
-            self._assignments.mark_source_inactive(account_id, source_name)
         else:
             result.accounts_failed = 1
             result.errors.append(f"{username}: {fr.error}")
@@ -297,16 +307,21 @@ class SourceDeleteService:
             errors=[fr.error] if fr.error else [],
         )
 
-        action = DeleteAction(
-            deleted_at=utcnow(),
-            delete_type="single",
-            scope="account",
-            total_sources=1,
-            total_accounts_affected=1 if fr.removed else 0,
-            machine=socket.gethostname(),
-            notes=f"Account: {username}",
-        )
-        result.action_id = self._history.save_action(action, [item])
+        # Commit assignment update + audit trail atomically
+        with transaction(self._conn):
+            if fr.removed or not fr.found:
+                self._assignments.mark_source_inactive(account_id, source_name)
+
+            action = DeleteAction(
+                deleted_at=utcnow(),
+                delete_type="single",
+                scope="account",
+                total_sources=1,
+                total_accounts_affected=1 if fr.removed else 0,
+                machine=socket.gethostname(),
+                notes=f"Account: {username}",
+            )
+            result.action_id = self._history.save_action(action, [item])
 
         logger.info(
             f"[Delete] scope=account source='{source_name}' account={username} "
@@ -382,6 +397,7 @@ class SourceDeleteService:
 
         deleter = SourceDeleter(bot_root)
         items: list[DeleteItem] = []
+        to_deactivate: list[str] = []
 
         for src_name in source_names:
             result.accounts_attempted += 1
@@ -390,7 +406,7 @@ class SourceDeleteService:
             affected_details = []
             if fr.removed:
                 result.accounts_removed += 1
-                self._assignments.mark_source_inactive(account_id, src_name)
+                to_deactivate.append(src_name)
                 affected_details.append({
                     "account_id": account_id,
                     "device_id": device_id,
@@ -399,7 +415,7 @@ class SourceDeleteService:
                 })
             elif not fr.found:
                 result.accounts_not_found += 1
-                self._assignments.mark_source_inactive(account_id, src_name)
+                to_deactivate.append(src_name)
             else:
                 result.accounts_failed += 1
                 result.errors.append(f"{src_name}: {fr.error}")
@@ -414,16 +430,21 @@ class SourceDeleteService:
                 errors=[fr.error] if fr.error else [],
             ))
 
-        action = DeleteAction(
-            deleted_at=utcnow(),
-            delete_type="bulk",
-            scope="account",
-            total_sources=len(source_names),
-            total_accounts_affected=1 if result.accounts_removed > 0 else 0,
-            machine=socket.gethostname(),
-            notes=notes or f"Account cleanup: {username}",
-        )
-        result.action_id = self._history.save_action(action, items)
+        # Commit all DB changes atomically: assignment updates + audit trail
+        with transaction(self._conn):
+            for src_name in to_deactivate:
+                self._assignments.mark_source_inactive(account_id, src_name)
+
+            action = DeleteAction(
+                deleted_at=utcnow(),
+                delete_type="bulk",
+                scope="account",
+                total_sources=len(source_names),
+                total_accounts_affected=1 if result.accounts_removed > 0 else 0,
+                machine=socket.gethostname(),
+                notes=notes or f"Account cleanup: {username}",
+            )
+            result.action_id = self._history.save_action(action, items)
 
         logger.info(
             f"[Delete] scope=account_cleanup account={username} "
@@ -472,6 +493,8 @@ class SourceDeleteService:
 
         revert_items: list[DeleteItem] = []
         all_restored_users: set[str] = set()
+        # Collect (account_id, source_name) pairs to reactivate in one transaction
+        to_activate: list[tuple[int, str]] = []
 
         for item in action.items:
             if item.files_removed == 0:
@@ -508,16 +531,12 @@ class SourceDeleteService:
                     revert_item.affected_accounts.append(detail["username"])
                     revert_item.affected_details.append(detail)
                     all_restored_users.add(detail["username"])
-                    self._assignments.mark_source_active(
-                        detail["account_id"], item.source_name
-                    )
+                    to_activate.append((detail["account_id"], item.source_name))
                 elif fr.already_present:
                     result.accounts_not_found += 1  # "not_found" = "already present"
                     revert_item.files_not_found += 1
                     # Also mark active in OH since the source is in the file
-                    self._assignments.mark_source_active(
-                        detail["account_id"], item.source_name
-                    )
+                    to_activate.append((detail["account_id"], item.source_name))
                 elif fr.error:
                     result.accounts_failed += 1
                     revert_item.files_failed += 1
@@ -527,21 +546,26 @@ class SourceDeleteService:
 
             revert_items.append(revert_item)
 
-        # Mark original action as reverted
-        self._history.mark_reverted(action_id)
+        # Commit all DB changes atomically: reactivations + status update + audit trail
+        with transaction(self._conn):
+            for acc_id, src_name in to_activate:
+                self._assignments.mark_source_active(acc_id, src_name)
 
-        # Save the revert action
-        revert_action = DeleteAction(
-            deleted_at=utcnow(),
-            delete_type="revert",
-            scope=action.scope,
-            total_sources=len(revert_items),
-            total_accounts_affected=len(all_restored_users),
-            machine=socket.gethostname(),
-            revert_of_action_id=action_id,
-            notes=f"Revert of action #{action_id}",
-        )
-        result.action_id = self._history.save_action(revert_action, revert_items)
+            # Mark original action as reverted
+            self._history.mark_reverted(action_id)
+
+            # Save the revert action
+            revert_action = DeleteAction(
+                deleted_at=utcnow(),
+                delete_type="revert",
+                scope=action.scope,
+                total_sources=len(revert_items),
+                total_accounts_affected=len(all_restored_users),
+                machine=socket.gethostname(),
+                revert_of_action_id=action_id,
+                notes=f"Revert of action #{action_id}",
+            )
+            result.action_id = self._history.save_action(revert_action, revert_items)
 
         logger.info(
             f"[Revert] original_action=#{action_id} "

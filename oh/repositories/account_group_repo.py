@@ -108,35 +108,35 @@ class AccountGroupRepository:
         """Add accounts to a group. Returns count added (skips duplicates)."""
         now = utcnow()
         added = 0
-        for aid in account_ids:
-            try:
-                self._conn.execute(
-                    """
-                    INSERT OR IGNORE INTO account_group_members
-                        (group_id, account_id, added_at)
-                    VALUES (?, ?, ?)
-                    """,
-                    (group_id, aid, now),
-                )
-                added += 1
-            except sqlite3.IntegrityError:
-                pass
-        self._conn.commit()
+        with self._conn:
+            for aid in account_ids:
+                try:
+                    self._conn.execute(
+                        """
+                        INSERT OR IGNORE INTO account_group_members
+                            (group_id, account_id, added_at)
+                        VALUES (?, ?, ?)
+                        """,
+                        (group_id, aid, now),
+                    )
+                    added += 1
+                except sqlite3.IntegrityError:
+                    pass
         return added
 
     def remove_members(self, group_id: int, account_ids: List[int]) -> int:
         """Remove accounts from a group. Returns count removed."""
         removed = 0
-        for aid in account_ids:
-            cursor = self._conn.execute(
-                """
-                DELETE FROM account_group_members
-                WHERE group_id = ? AND account_id = ?
-                """,
-                (group_id, aid),
-            )
-            removed += cursor.rowcount
-        self._conn.commit()
+        with self._conn:
+            for aid in account_ids:
+                cursor = self._conn.execute(
+                    """
+                    DELETE FROM account_group_members
+                    WHERE group_id = ? AND account_id = ?
+                    """,
+                    (group_id, aid),
+                )
+                removed += cursor.rowcount
         return removed
 
     def get_members(self, group_id: int) -> List[int]:

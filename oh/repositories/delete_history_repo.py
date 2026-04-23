@@ -32,56 +32,56 @@ class DeleteHistoryRepository:
         Insert the action header and all item rows atomically.
         Sets action.id and item.action_id.  Returns action.id.
         """
-        cursor = self._conn.execute(
-            """
-            INSERT INTO source_delete_actions (
-                deleted_at, delete_type, scope,
-                total_sources, total_accounts_affected,
-                threshold_pct, machine, notes,
-                status, revert_of_action_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                action.deleted_at or utcnow(),
-                action.delete_type,
-                action.scope,
-                action.total_sources,
-                action.total_accounts_affected,
-                action.threshold_pct,
-                action.machine,
-                action.notes,
-                action.status or "completed",
-                action.revert_of_action_id,
-            ),
-        )
-        action_id = cursor.lastrowid
-        action.id = action_id
-
-        if items:
-            self._conn.executemany(
+        with self._conn:
+            cursor = self._conn.execute(
                 """
-                INSERT INTO source_delete_items (
-                    action_id, source_name, affected_accounts_json,
-                    files_removed, files_not_found, files_failed, errors_json,
-                    affected_details_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO source_delete_actions (
+                    deleted_at, delete_type, scope,
+                    total_sources, total_accounts_affected,
+                    threshold_pct, machine, notes,
+                    status, revert_of_action_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                [
-                    (
-                        action_id,
-                        item.source_name,
-                        json.dumps(item.affected_accounts),
-                        item.files_removed,
-                        item.files_not_found,
-                        item.files_failed,
-                        json.dumps(item.errors) if item.errors else None,
-                        json.dumps(item.affected_details) if item.affected_details else None,
-                    )
-                    for item in items
-                ],
+                (
+                    action.deleted_at or utcnow(),
+                    action.delete_type,
+                    action.scope,
+                    action.total_sources,
+                    action.total_accounts_affected,
+                    action.threshold_pct,
+                    action.machine,
+                    action.notes,
+                    action.status or "completed",
+                    action.revert_of_action_id,
+                ),
             )
+            action_id = cursor.lastrowid
+            action.id = action_id
 
-        self._conn.commit()
+            if items:
+                self._conn.executemany(
+                    """
+                    INSERT INTO source_delete_items (
+                        action_id, source_name, affected_accounts_json,
+                        files_removed, files_not_found, files_failed, errors_json,
+                        affected_details_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            action_id,
+                            item.source_name,
+                            json.dumps(item.affected_accounts),
+                            item.files_removed,
+                            item.files_not_found,
+                            item.files_failed,
+                            json.dumps(item.errors) if item.errors else None,
+                            json.dumps(item.affected_details) if item.affected_details else None,
+                        )
+                        for item in items
+                    ],
+                )
+
         return action_id
 
     # ------------------------------------------------------------------

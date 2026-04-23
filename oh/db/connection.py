@@ -6,6 +6,8 @@ import os
 import shutil
 import sqlite3
 import logging
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -81,3 +83,60 @@ def close_connection() -> None:
         _connection.close()
         _connection = None
         logger.info("OH database connection closed.")
+
+
+# ------------------------------------------------------------------
+# Transaction helper
+# ------------------------------------------------------------------
+
+_tx_depth: threading.local = threading.local()
+
+
+@contextmanager
+def transaction(conn: sqlite3.Connection):
+    """Nestable transaction context manager for SQLite.
+
+    Usage::
+
+        with transaction(conn):
+            conn.execute("INSERT ...")
+            conn.execute("UPDATE ...")
+            # both are committed atomically on exit
+
+    Nesting is safe: the outermost ``transaction()`` controls the real
+    COMMIT/ROLLBACK.  Inner calls are no-ops (depth counter).
+
+    While a transaction is active, ``conn.commit()`` calls from
+    repository methods are suppressed (monkey-patched to no-op) so
+    that intermediate writes do not break atomicity.  The outermost
+    context manager restores the original ``commit`` and calls it on
+    successful exit.
+
+    Uses SAVEPOINT internally so it works even when an implicit
+    transaction is already open (which is normal with Python sqlite3's
+    default ``isolation_level``).
+    """
+    depth = getattr(_tx_depth, "depth", 0)
+    _tx_depth.depth = depth + 1
+
+    if depth == 0:
+        # Outermost — suppress individual commits and use a savepoint
+        original_commit = conn.commit
+        conn.commit = lambda: None  # type: ignore[assignment]
+        conn.execute("SAVEPOINT oh_tx")
+
+    try:
+        yield conn
+    except BaseException:
+        _tx_depth.depth -= 1
+        if _tx_depth.depth == 0:
+            conn.commit = original_commit  # type: ignore[possibly-undefined]
+            conn.execute("ROLLBACK TO oh_tx")
+            conn.execute("RELEASE oh_tx")
+        raise
+    else:
+        _tx_depth.depth -= 1
+        if _tx_depth.depth == 0:
+            conn.commit = original_commit  # type: ignore[possibly-undefined]
+            conn.execute("RELEASE oh_tx")
+            conn.commit()

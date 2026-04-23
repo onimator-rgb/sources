@@ -28,6 +28,7 @@ from oh.models.session import (
     TAG_CAT_TB,
     TAG_CAT_LIMITS,
 )
+from oh.db.connection import transaction
 from oh.repositories.account_repo import AccountRepository
 from oh.repositories.tag_repo import TagRepository
 from oh.repositories.operator_action_repo import OperatorActionRepository
@@ -51,6 +52,7 @@ class OperatorActionService:
         self._accounts = account_repo
         self._tags = tag_repo
         self._actions = action_repo
+        self._conn = account_repo._conn
 
     # ------------------------------------------------------------------
     # Review flag
@@ -65,12 +67,12 @@ class OperatorActionService:
             return "account_not_found"
 
         old_note = acc.review_note if acc.review_flag else None
-        self._accounts.set_review_flag(account_id, note)
-
-        self._log(acc, ACTION_SET_REVIEW,
-                  old_value=old_note,
-                  new_value=note or "flagged",
-                  note=note)
+        with transaction(self._conn):
+            self._accounts.set_review_flag(account_id, note)
+            self._log(acc, ACTION_SET_REVIEW,
+                      old_value=old_note,
+                      new_value=note or "flagged",
+                      note=note)
 
         logger.info(f"[Action] set_review: {acc.username} note={note!r}")
         return "review_set"
@@ -82,11 +84,11 @@ class OperatorActionService:
             return "account_not_found"
 
         old_note = acc.review_note if acc.review_flag else None
-        self._accounts.clear_review_flag(account_id)
-
-        self._log(acc, ACTION_CLEAR_REVIEW,
-                  old_value=old_note or "flagged",
-                  new_value=None)
+        with transaction(self._conn):
+            self._accounts.clear_review_flag(account_id)
+            self._log(acc, ACTION_CLEAR_REVIEW,
+                      old_value=old_note or "flagged",
+                      new_value=None)
 
         logger.info(f"[Action] clear_review: {acc.username}")
         return "review_cleared"
@@ -107,10 +109,10 @@ class OperatorActionService:
         if acc is None:
             return "account_not_found"
 
-        self._tags.set_operator_tag(account_id, category, value, level)
-
-        self._log(acc, ACTION_ADD_TAG,
-                  new_value=f"{category}:{value}")
+        with transaction(self._conn):
+            self._tags.set_operator_tag(account_id, category, value, level)
+            self._log(acc, ACTION_ADD_TAG,
+                      new_value=f"{category}:{value}")
 
         logger.info(f"[Action] add_tag: {acc.username} {category}:{value}")
         return "tag_added"
@@ -127,9 +129,9 @@ class OperatorActionService:
             return "account_not_found"
 
         old_desc = f"{category}:{value}" if value else category
-        self._tags.remove_operator_tag(account_id, category, value)
-
-        self._log(acc, ACTION_REMOVE_TAG, old_value=old_desc)
+        with transaction(self._conn):
+            self._tags.remove_operator_tag(account_id, category, value)
+            self._log(acc, ACTION_REMOVE_TAG, old_value=old_desc)
 
         logger.info(f"[Action] remove_tag: {acc.username} {old_desc}")
         return "tag_removed"
@@ -164,13 +166,13 @@ class OperatorActionService:
         new_value = f"TB{new_level}"
 
         # Remove all operator TB tags, set the new one
-        self._tags.remove_operator_tag(account_id, TAG_CAT_TB)
-        self._tags.set_operator_tag(
-            account_id, TAG_CAT_TB, new_value, new_level
-        )
-
-        self._log(acc, ACTION_INCREMENT_TB,
-                  old_value=old_value, new_value=new_value)
+        with transaction(self._conn):
+            self._tags.remove_operator_tag(account_id, TAG_CAT_TB)
+            self._tags.set_operator_tag(
+                account_id, TAG_CAT_TB, new_value, new_level
+            )
+            self._log(acc, ACTION_INCREMENT_TB,
+                      old_value=old_value, new_value=new_value)
 
         logger.info(
             f"[Action] increment_tb: {acc.username} "
@@ -209,13 +211,13 @@ class OperatorActionService:
         new_value = f"limits {new_level}"
 
         # Remove all operator limits tags, set the new one
-        self._tags.remove_operator_tag(account_id, TAG_CAT_LIMITS)
-        self._tags.set_operator_tag(
-            account_id, TAG_CAT_LIMITS, new_value, new_level
-        )
-
-        self._log(acc, ACTION_INCREMENT_LIMITS,
-                  old_value=old_value, new_value=new_value)
+        with transaction(self._conn):
+            self._tags.remove_operator_tag(account_id, TAG_CAT_LIMITS)
+            self._tags.set_operator_tag(
+                account_id, TAG_CAT_LIMITS, new_value, new_level
+            )
+            self._log(acc, ACTION_INCREMENT_LIMITS,
+                      old_value=old_value, new_value=new_value)
 
         logger.info(
             f"[Action] increment_limits: {acc.username} "
