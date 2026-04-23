@@ -37,7 +37,7 @@ def _create_connection() -> sqlite3.Connection:
     db_path = get_db_path()
     thread_name = threading.current_thread().name
     logger.info(f"Opening OH database for thread '{thread_name}': {db_path}")
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     # WAL mode: allows reads while writes are in progress (important
     # for background workers reading while UI renders).
