@@ -565,6 +565,13 @@ class MainWindow(QMainWindow):
         self._busy_label = QLabel("")
         self._busy_label.setStyleSheet(f"font-style: italic; color: {sc('text_secondary').name()};")
 
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setFixedHeight(28)
+        self._cancel_btn.setFixedWidth(60)
+        self._cancel_btn.setToolTip("Cancel the running operation")
+        self._cancel_btn.clicked.connect(self._on_cancel_worker)
+        self._cancel_btn.setVisible(False)
+
         self._last_sync_label = QLabel("")
         self._last_sync_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -636,6 +643,7 @@ class MainWindow(QMainWindow):
         lo.addWidget(self._groups_btn)
         lo.addSpacing(12)
         lo.addWidget(self._busy_label, stretch=1)
+        lo.addWidget(self._cancel_btn)
         lo.addWidget(self._report_problem_btn)
         lo.addWidget(self._last_sync_label)
 
@@ -1039,6 +1047,11 @@ class MainWindow(QMainWindow):
                 header_item.setToolTip(tip)
 
         t.doubleClicked.connect(self._on_row_double_clicked)
+
+        # Context menu (right-click)
+        t.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        t.customContextMenuRequested.connect(self._on_table_context_menu)
+
         self._table = t
         return t
 
@@ -2288,6 +2301,7 @@ class MainWindow(QMainWindow):
         self._worker = WorkerThread(do_scan)
         self._worker.result.connect(self._on_scan_done)
         self._worker.error.connect(self._on_worker_error)
+        self._worker.cancelled.connect(self._on_worker_cancelled)
         self._worker.start()
 
     def _on_scan_done(self, discovered: list) -> None:
@@ -2317,6 +2331,7 @@ class MainWindow(QMainWindow):
         self._worker = WorkerThread(do_sync)
         self._worker.result.connect(self._on_sync_done)
         self._worker.error.connect(self._on_worker_error)
+        self._worker.cancelled.connect(self._on_worker_cancelled)
         self._worker.finished.connect(lambda: self._set_busy(False))
         self._worker.start()
 
@@ -2525,6 +2540,7 @@ class MainWindow(QMainWindow):
         self._worker = WorkerThread(do_fbr)
         self._worker.result.connect(self._on_fbr_batch_done)
         self._worker.error.connect(self._on_worker_error)
+        self._worker.cancelled.connect(self._on_worker_cancelled)
         self._worker.finished.connect(lambda: self._set_busy(False))
         self._worker.start()
 
@@ -2560,6 +2576,7 @@ class MainWindow(QMainWindow):
         self._worker = WorkerThread(do_lbr)
         self._worker.result.connect(self._on_lbr_batch_done)
         self._worker.error.connect(self._on_worker_error)
+        self._worker.cancelled.connect(self._on_worker_cancelled)
         self._worker.finished.connect(lambda: self._set_busy(False))
         self._worker.start()
 
@@ -2958,6 +2975,76 @@ class MainWindow(QMainWindow):
     # User actions — operator action menu (per-account)
     # ------------------------------------------------------------------
 
+    def _on_table_context_menu(self, pos) -> None:
+        """Right-click context menu for the accounts table."""
+        row = self._table.rowAt(pos.y())
+        if row < 0:
+            return
+
+        item = self._table.item(row, COL_USERNAME)
+        if not item:
+            return
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        kind, payload = data
+
+        menu = QMenu(self)
+
+        # Copy Username — always available
+        username_text = item.text() or ""
+        menu.addAction("Copy Username", lambda: self._copy_text_to_clipboard(username_text))
+
+        if kind == "account":
+            acc = self._accounts.get_by_id(payload)
+            if acc is None:
+                return
+
+            menu.addSeparator()
+
+            has_sources = acc.data_db_exists or acc.sources_txt_exists
+            src_action = menu.addAction(
+                "View Sources",
+                lambda: self._on_view_sources(acc.device_id, acc.username, acc.id),
+            )
+            src_action.setEnabled(has_sources)
+
+            svc = self._operator_action_service
+            if svc:
+                menu.addSeparator()
+                if acc.review_flag:
+                    menu.addAction("Clear Review", lambda: self._do_clear_review(acc))
+                else:
+                    menu.addAction("Set Review", lambda: self._do_set_review(acc))
+                menu.addAction("TB +1", lambda: self._do_tb_increment(acc))
+                menu.addAction("Limits +1", lambda: self._do_limits_increment(acc))
+
+            menu.addSeparator()
+            menu.addAction("Open Folder", lambda: self._open_account_folder(acc.device_id, acc.username))
+
+        elif kind == "orphan":
+            disc = payload
+            menu.addSeparator()
+
+            has_sources = disc.data_db_exists or disc.sources_txt_exists
+            src_action = menu.addAction(
+                "View Sources",
+                lambda: self._on_view_sources(disc.device_id, disc.username, None),
+            )
+            src_action.setEnabled(has_sources)
+
+            menu.addSeparator()
+            menu.addAction("Open Folder", lambda: self._open_account_folder(disc.device_id, disc.username))
+
+        menu.exec(self._table.viewport().mapToGlobal(pos))
+
+    def _copy_text_to_clipboard(self, text: str) -> None:
+        """Copy text to the system clipboard."""
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            clipboard.setText(text)
+
     def _show_action_menu(self, acc: AccountRecord, btn: QPushButton) -> None:
         """Show a popup menu of all actions for this account."""
         menu = QMenu(self)
@@ -3232,6 +3319,19 @@ class MainWindow(QMainWindow):
             return None
         return bot_root
 
+    def _on_cancel_worker(self) -> None:
+        """Cancel the currently running background operation."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
+            self._busy_label.setText("Cancelling…")
+            self._cancel_btn.setEnabled(False)
+
+    def _on_worker_cancelled(self) -> None:
+        """Handle the cancelled signal from WorkerThread."""
+        self._set_busy(False)
+        self._set_status("Operation cancelled.")
+        logger.info("Background operation cancelled by operator")
+
     def _on_worker_error(self, error: str) -> None:
         self._set_busy(False)
         logger.error(f"Background worker error: {error}")
@@ -3241,7 +3341,10 @@ class MainWindow(QMainWindow):
         self._scan_btn.setEnabled(not busy)
         self._fbr_btn.setEnabled(not busy)
         self._busy_label.setText(message if busy else "")
+        self._cancel_btn.setVisible(busy)
+        self._cancel_btn.setEnabled(busy)
         if not busy:
+            self._worker = None
             self._set_status("Ready.")
 
     def _on_export_csv(self) -> None:
